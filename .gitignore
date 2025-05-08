@@ -1,3 +1,7 @@
 .vscode
 .idea
+.config
 
+changelogs
+
+go.sum
