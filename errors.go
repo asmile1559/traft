@@ -1,1 +1,9 @@
 package traft
+
+import "errors"
+
+var (
+	ErrLogAlreadySnapshot = errors.New("log already snapshot")
+	ErrLogOutOfRange      = errors.New("log out of range")
+	ErrLogConflict        = errors.New("log conflict")
+)

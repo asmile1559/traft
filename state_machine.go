@@ -1,11 +1,14 @@
 package traft
 
 type StateMachine interface {
-	// arg: logData, json-type
+	// ApplyLog
+	//	arg: logData, json-type
 	ApplyLog(logData []byte) error
-	// arg: snapshotData, json-type
+	// ApplySnapshot
+	//	arg: snapshotData, json-type
 	ApplySnapshot(snapshotData []byte) error
 
-	// return: snapshotData, json-type
-	TakeSnapshot() ([]byte, error)
+	// TakeSnapshot
+	//	return: snapshotData, json-type
+	TakeSnapshot() []byte
 }

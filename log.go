@@ -1,0 +1,112 @@
+package traft
+
+import raftpb "github.com/asmile1559/traft/internal/apis/raft"
+
+// In this file, all functions designed lock-free because they are called by RPC Handler.
+// RPC Handler is locked by raftNode.lock.
+
+func (r *raftNode) lastLogIndex() uint64 {
+	if len(r.log) == 0 && r.snapshot == nil {
+		// this case is when the node is just started and no log entry is added
+		return 0
+	}
+	if len(r.log) == 0 {
+		// this case is when the node is just compacted and no log entry is added
+		return r.snapshot.LastIncludedIndex
+	}
+	return r.log[len(r.log)-1].Index
+}
+
+func (r *raftNode) lastLogTerm() uint64 {
+	if len(r.log) == 0 && r.snapshot == nil {
+		// this case is when the node is just started and no log entry is added
+		return 0
+	}
+	if len(r.log) == 0 {
+		// this case is when the node is just compacted and no log entry is added
+		return r.snapshot.LastIncludedTerm
+	}
+	return r.log[len(r.log)-1].Term
+}
+
+// 获取指定索引的日志条目的任期
+func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
+	if r.snapshot != nil && index <= r.snapshot.LastIncludedIndex {
+		if index == r.snapshot.LastIncludedIndex {
+			return r.snapshot.LastIncludedTerm, nil
+		}
+		return 0, ErrLogAlreadySnapshot
+	}
+	if index > r.lastLogIndex() {
+		return 0, ErrLogOutOfRange
+	}
+	if r.snapshot == nil {
+		return r.log[index].Term, nil
+	} else {
+		// 5 -> LastIncludedIndex
+		// 10 -> index
+		//      snapshot     <|>           r.log
+		// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
+		//                      [0, 1, 2, 3,  4,  5,  6, ...]
+		//                 A
+		//         LastIncludedIndex
+		// index = index - r.snapshot.LastIncludedIndex - 1
+		return r.log[index-r.snapshot.LastIncludedIndex-1].Term, nil
+	}
+}
+
+// 压缩日志，保留索引大于给定索引的日志条目
+func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
+	// 当前已经交由状态机执行的日志的索引和对应的
+	index := r.lastApplied
+	term, _ := r.getLogTerm(index)
+
+	snapshot := &raftpb.Snapshot{
+		LastIncludedIndex: index,
+		LastIncludedTerm:  term,
+		Data:              nil,
+	}
+	// 获取当前状态机的状态
+	snapshotData := r.stateMachine.TakeSnapshot()
+	snapshot.Data = snapshotData
+	// 更新节点的快照
+	r.snapshot = snapshot
+	// TODO: persist snapshot to disk
+
+	// update the log
+	r.log = append([]*raftpb.LogEntry{}, r.log[index+1:]...)
+	return snapshot, nil
+}
+
+// 截断日志，保留索引小于给定索引的日志条目
+func (r *raftNode) truncateLog(index uint64) error {
+	if r.snapshot != nil && index < r.snapshot.LastIncludedIndex {
+		return ErrLogAlreadySnapshot
+	}
+	if index > r.lastLogIndex() {
+		return ErrLogOutOfRange
+	}
+	if index == r.lastLogIndex() {
+		// nothing to do
+		return nil
+	}
+
+	r.log = append(make([]*raftpb.LogEntry, 0), r.log[:index+1]...)
+	return nil
+}
+
+// 检查日志条目是否匹配
+func (r *raftNode) checkLogMatch(prevLogTerm, prevLogIndex uint64) (bool, *raftpb.LogEntry, error) {
+	if term, err := r.getLogTerm(prevLogIndex); err != nil {
+		// use snapshot to recover
+		return false, nil, err
+	} else if term != prevLogTerm {
+		// log mismatch, rematch by leader next time
+		return false, &raftpb.LogEntry{
+			Index: prevLogIndex,
+			Term:  term,
+		}, ErrLogConflict
+	}
+	// log match but maybe need truncate
+	return true, nil, nil
+}

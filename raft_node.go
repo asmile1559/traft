@@ -46,18 +46,20 @@ type raftNode struct {
 
 	// write ahead log 预写日志
 	log []*raftpb.LogEntry
-	// first index of log entry. it equals to log[0].Index
-	firstIndex uint64
 
 	// volatile state on all servers
 	commitIndex uint64 // 已提交的日志索引
 	lastApplied uint64 // 已经交由状态机处理的日志索引, lastApplied <= commitIndex
 
+	// volatile state on leaders
+	nextIndex  map[string]uint64 // 下一个日志索引, key为节点id
+	matchIndex map[string]uint64 // 已经复制到大多数节点的日志索引, key为节点id
+
 	// snapshot for state
 	snapshot *raftpb.Snapshot // 上一个状态的快照
 
 	// used for executing log entries
-	sMachine StateMachine // 状态机接口，用于执行日志条目
+	stateMachine StateMachine // 状态机接口，用于执行日志条目
 
 	// used for persisting data
 	// persister Persister // 持久化接口，持久化数据
