@@ -29,6 +29,25 @@ func (r *raftNode) lastLogTerm() uint64 {
 	return r.log[len(r.log)-1].Term
 }
 
+func (r *raftNode) logOffset(index uint64) (uint64, error) {
+	if index <= r.snapshot.LastIncludedIndex {
+		return 0, ErrInvalidIndex
+	}
+
+	if r.snapshot != nil {
+		// 5 -> LastIncludedIndex
+		// 10 -> index
+		//      snapshot     <|>           r.log
+		// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
+		//                    | [0, 1, 2, 3,  4,  5,  6, ...]
+		//                 A
+		//         LastIncludedIndex
+		// index = index - r.snapshot.LastIncludedIndex - 1
+		index = index - r.snapshot.LastIncludedIndex - 1
+	}
+	return index, nil
+}
+
 // 获取指定索引的日志条目的任期
 func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
 	if r.snapshot != nil && index <= r.snapshot.LastIncludedIndex {
@@ -40,19 +59,12 @@ func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
 	if index > r.lastLogIndex() {
 		return 0, ErrLogOutOfRange
 	}
-	if r.snapshot == nil {
-		return r.log[index].Term, nil
-	} else {
-		// 5 -> LastIncludedIndex
-		// 10 -> index
-		//      snapshot     <|>           r.log
-		// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
-		//                      [0, 1, 2, 3,  4,  5,  6, ...]
-		//                 A
-		//         LastIncludedIndex
-		// index = index - r.snapshot.LastIncludedIndex - 1
-		return r.log[index-r.snapshot.LastIncludedIndex-1].Term, nil
+
+	i, err := r.logOffset(index)
+	if err != nil {
+		return 0, err
 	}
+	return r.log[i].Term, nil
 }
 
 // 压缩日志，保留索引大于给定索引的日志条目
@@ -73,8 +85,12 @@ func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
 	r.snapshot = snapshot
 	// TODO: persist snapshot to disk
 
+	i, err := r.logOffset(index)
+	if err != nil {
+		return nil, err
+	}
 	// update the log
-	r.log = append([]*raftpb.LogEntry{}, r.log[index+1:]...)
+	r.log = append(make([]*raftpb.LogEntry, 0), r.log[i+1:]...)
 	return snapshot, nil
 }
 
@@ -91,22 +107,36 @@ func (r *raftNode) truncateLog(index uint64) error {
 		return nil
 	}
 
-	r.log = append(make([]*raftpb.LogEntry, 0), r.log[:index+1]...)
+	i, err := r.logOffset(index)
+	if err != nil {
+		return err
+	}
+	r.log = append(make([]*raftpb.LogEntry, 0), r.log[:i+1]...)
 	return nil
 }
 
 // 检查日志条目是否匹配
 func (r *raftNode) checkLogMatch(prevLogTerm, prevLogIndex uint64) (bool, *raftpb.LogEntry, error) {
-	if term, err := r.getLogTerm(prevLogIndex); err != nil {
+	term, err := r.getLogTerm(prevLogIndex)
+	if err != nil {
 		// use snapshot to recover
 		return false, nil, err
-	} else if term != prevLogTerm {
+	}
+
+	if term != prevLogTerm {
 		// log mismatch, rematch by leader next time
 		return false, &raftpb.LogEntry{
 			Index: prevLogIndex,
 			Term:  term,
 		}, ErrLogConflict
 	}
-	// log match but maybe need truncate
+
+	if r.lastLogIndex() > prevLogIndex {
+		// log out of range, need to resend
+		return true, &raftpb.LogEntry{
+			Index: prevLogIndex,
+			Term:  term,
+		}, ErrNeedTruncate
+	}
 	return true, nil, nil
 }

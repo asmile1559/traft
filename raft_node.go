@@ -38,6 +38,9 @@ type RaftNode interface {
 
 type raftNode struct {
 
+	// raft node must implement TRaftService
+	raftpb.UnimplementedTRaftServiceServer
+
 	// Metadata
 	id          string
 	role        Role // leader, follower, candidate

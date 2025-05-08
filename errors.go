@@ -6,4 +6,7 @@ var (
 	ErrLogAlreadySnapshot = errors.New("log already snapshot")
 	ErrLogOutOfRange      = errors.New("log out of range")
 	ErrLogConflict        = errors.New("log conflict")
+
+	ErrNeedTruncate = errors.New("need truncate")
+	ErrInvalidIndex = errors.New("invalid index")
 )
