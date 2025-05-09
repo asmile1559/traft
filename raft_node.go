@@ -51,14 +51,11 @@ type raftNode struct {
 
 	// write ahead log 预写日志
 	log []*raftpb.LogEntry
+	mu  sync.RWMutex
 
 	// volatile state on all servers
 	commitIndex uint64 // 已提交的日志索引
 	lastApplied uint64 // 已经交由状态机处理的日志索引, lastApplied <= commitIndex
-
-	// volatile state on leaders
-	nextIndex  map[string]uint64 // 下一个日志索引, key为节点id
-	matchIndex map[string]uint64 // 已经复制到大多数节点的日志索引, key为节点id
 
 	// snapshot for state
 	snapshot *raftpb.Snapshot // 上一个状态的快照
@@ -77,9 +74,8 @@ type raftNode struct {
 	// when heartbeatTicker expires, send heartbeat to all followers, it used by leader
 	heartbeatTicker *time.Ticker
 
-	peers          []string                 // 其他节点的地址
-	heartbeatC     map[string]chan struct{} // notify to heartbeat
-	appendEntriesC map[string]chan struct{} // notify to append entries
-
-	mu sync.RWMutex
+	appendEntriesC     chan string // chan of peer id, used to notify append entries
+	appendEntriesRespC chan *Response
+	// only provide read operation, each peer in raft node has its own mutex.
+	peers map[string]*Peer
 }

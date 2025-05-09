@@ -2,36 +2,31 @@ package traft
 
 import (
 	"context"
-	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"sync"
 )
 
 func (r *raftNode) heartbeat(ctx context.Context) {
 	// 发送心跳
-	wg := sync.WaitGroup{}
-	for peer := range r.heartbeatC {
-		wg.Add(1)
-		go func(peer string) {
-			defer wg.Done()
-			if err := r.heartbeatPeer(ctx, peer); err != nil {
-				fmt.Println("heartbeat error:", err)
-			}
-		}(peer)
+	for _, peer := range r.peers {
+		go r.heartbeatPeer(ctx, peer)
 	}
-	wg.Wait()
-
 	for {
 		select {
 		case <-ctx.Done():
+			// TODO: clean resources
 			return
 		case <-r.heartbeatTicker.C:
 			// if the ticker stops, it will not send heartbeats
-			for _, c := range r.heartbeatC {
-				c <- struct{}{}
+			wg := sync.WaitGroup{}
+			for _, peer := range r.peers {
+				wg.Add(1)
+				go func(peer *Peer) {
+					defer wg.Done()
+					peer.notifyHeartbeatC <- struct{}{}
+				}(peer)
 			}
+			wg.Wait()
 		}
 	}
 
@@ -39,44 +34,34 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 
 }
 
-func (r *raftNode) heartbeatPeer(ctx context.Context, peer string) error {
-	cc, err := grpc.NewClient(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return err
-	}
-	defer func(conn *grpc.ClientConn) {
-		_ = conn.Close()
-	}(cc)
-
-	client := raftpb.NewTRaftServiceClient(cc)
-	heartbeatC := r.heartbeatC[peer]
-	stopFlag := false
-	for {
-		select {
-		case <-ctx.Done():
-			stopFlag = true
-		case <-heartbeatC:
-			r.sendHeartbeat(ctx, client)
+func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {
+	select {
+	case <-ctx.Done():
+		// TODO: clean resources
+		return
+	case <-peer.notifyHeartbeatC:
+		prevLogIndex := peer.NextIndex() - 1
+		prevLogTerm, err := r.getLogTerm(prevLogIndex)
+		if err != nil {
+			// this case should not happen
+			// TODO: use snapshot to recover
+			panic(err)
 		}
-		if stopFlag {
-			break
+		req := &raftpb.AppendEntriesReq{
+			Term:         r.currentTerm,
+			LeaderId:     r.id,
+			PrevLogIndex: prevLogIndex,
+			PrevLogTerm:  prevLogTerm,
+			LeaderCommit: r.commitIndex,
+			Entries:      nil,
+		}
+
+		client := raftpb.NewTRaftServiceClient(peer.cc)
+		resp, err := client.AppendEntries(ctx, req)
+		r.appendEntriesRespC <- &Response{
+			PeerID: peer.Id(),
+			Resp:   resp,
+			Err:    err,
 		}
 	}
-
-	// clean resources
-
-	return nil
-}
-
-func (r *raftNode) sendHeartbeat(ctx context.Context, client raftpb.TRaftServiceClient) {
-	resp, err := client.AppendEntries(ctx, &raftpb.AppendEntriesReq{
-		Term:         r.currentTerm,
-		LeaderId:     r.id,
-		PrevLogIndex: r.lastLogIndex(),
-		PrevLogTerm:  r.lastLogTerm(),
-		LeaderCommit: r.commitIndex,
-		Entries:      nil,
-	})
-
-	fmt.Println(resp, err)
 }

@@ -3,11 +3,17 @@ package traft
 import (
 	"context"
 	"errors"
-	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
+type Response struct {
+	PeerID string
+	Resp   *raftpb.AppendEntriesResp
+	Err    error
+}
+
 // AppendEntries is the raft heartbeat and log replication RPC.
+// TODO: check it is thread safe!
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -38,24 +44,10 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 		// case 2: resend append entries(ErrLogConflict or ErrLogOutOfRange)
 		if errors.Is(err, ErrLogOutOfRange) {
 			resp.ConflictTerm = r.lastLogTerm()
-			resp.ConflictIndex = r.lastLogIndex() + 1
+			resp.ConflictIndex = r.lastLogIndex()
 		} else if errors.Is(err, ErrLogConflict) {
-			conflictTerm := entry.Term
-			conflictIndex := entry.Index
-
-			resp.ConflictTerm = conflictTerm
-			resp.ConflictIndex = conflictIndex
-			for i := conflictIndex; i > r.snapshot.LastIncludedIndex; i-- {
-				idx, err := r.logOffset(i)
-				if err != nil {
-					continue
-				}
-				if r.log[idx].Term != conflictTerm {
-					resp.ConflictTerm = conflictTerm
-					resp.ConflictIndex = i + 1
-					break
-				}
-			}
+			resp.ConflictTerm = entry.Term
+			resp.ConflictIndex = entry.Index
 		}
 		return resp, err
 	}
@@ -71,7 +63,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	}
 
 	resp.Success = true
-	resp.MatchIndex = req.PrevLogIndex + uint64(len(req.Entries))
+	resp.MatchIndex = r.lastLogIndex()
 	// update commit index
 	if req.LeaderCommit > r.commitIndex {
 		last := r.lastLogIndex()
@@ -81,44 +73,118 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	return resp, nil
 }
 
-// a call chain
-// appendEntries -- not ok --> appendEntries -- not ok --> appendEntries ...
-// |                                |
-// +----- ok ---> exit              +----- ok ---> exit
-func (r *raftNode) appendEntries(peer string, client raftpb.TRaftServiceClient) error {
-	prevLogIndex := r.nextIndex[peer] - 1
-	prevLogTerm, _ := r.getLogTerm(prevLogIndex)
-	logOffset, _ := r.logOffset(prevLogIndex)
+// When a follower transitions to a leader, it resets the nextIndex[] and matchIndex[]. The nextIndex[] is set to the
+// `lastLogIndex + 1`, and the matchIndex[] is set to 0. Then, the leader sends heartbeat to all peers. If the peer who
+// receives the heartbeat, it will check the log, and then feed back the `AppendEntriesResp` to the leader.
+
+func (r *raftNode) appendEntries(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			// TODO: clean resources
+			return
+		case p := <-r.appendEntriesC:
+			// send append entries to peer
+			peer := r.peers[p]
+			if peer == nil {
+				// TODO: use other method to handle this error
+				panic(ErrPeerIsNil.Error())
+			}
+			// send append entries to peer
+			r.appendEntriesPeer(ctx, peer)
+		}
+	}
+}
+
+func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
+	prevLogIndex := peer.NextIndex() - 1
+	prevLogTerm, err := r.getLogTerm(prevLogIndex)
+	if err != nil {
+		// TODO: use snapshot to recover
+		return
+	}
 	req := &raftpb.AppendEntriesReq{
 		Term:         r.currentTerm,
 		LeaderId:     r.id,
 		PrevLogIndex: prevLogIndex,
 		PrevLogTerm:  prevLogTerm,
-		Entries:      r.log[logOffset+1:],
 		LeaderCommit: r.commitIndex,
+		Entries:      r.log[prevLogIndex+1:],
 	}
+	resp, err := peer.SendAppendEntriesRequest(ctx, req)
+	r.appendEntriesRespC <- &Response{
+		PeerID: peer.Id(),
+		Resp:   resp,
+		Err:    err,
+	}
+}
 
-	resp, err := client.AppendEntries(context.Background(), req)
-	if err != nil {
-		if errors.Is(err, ErrLogAlreadySnapshot) {
-			// snapshot is needed, update nextIndex
-			r.nextIndex[peer] = r.snapshot.LastIncludedIndex + 1
-			isResp, err := client.InstallSnapshot(context.Background(), &raftpb.InstallSnapshotReq{
-				Term:     r.currentTerm,
-				LeaderId: r.id,
-				Snapshot: r.snapshot,
-			})
+// no matter heartbeat or appendEntries request, the response will be processed by that function.
+// cause there maybe
+func (r *raftNode) processResponse(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			// TODO: clean resources
+			return
+		case rPack := <-r.appendEntriesRespC:
+			id := rPack.PeerID
+			err := rPack.Err
+			resp := rPack.Resp
+			peer := r.peers[id]
 			if err != nil {
-				return err
+				if errors.Is(err, ErrLogAlreadySnapshot) {
+					// call InstallSnapshot
+				} else if errors.Is(err, ErrLogOutOfRange) {
+					conflictIndex := resp.ConflictIndex
+					conflictTerm := resp.ConflictTerm
+					term, _ := r.getLogTerm(conflictIndex)
+					if term != conflictTerm {
+						// call InstallSnapshot
+
+						break
+					}
+					peer.Update(conflictIndex+1, conflictIndex)
+				} else if errors.Is(err, ErrLogConflict) {
+					conflictIndex := resp.ConflictIndex
+					conflictTerm := resp.ConflictTerm
+					ci := conflictIndex
+					// find the first log entry whose term is not conflictTerm
+					if r.snapshot != nil {
+						for ; ci > r.snapshot.LastIncludedIndex; ci-- {
+							idx, _ := r.logOffset(ci)
+							if r.log[idx].Term != conflictTerm {
+								peer.UpdateNextIndex(ci + 1)
+								break
+							}
+						}
+						// if not found, call InstallSnapshot
+						if ci == r.snapshot.LastIncludedIndex {
+							peer.UpdateNextIndex(r.snapshot.LastIncludedIndex + 1)
+						}
+					} else {
+						for ; ci < conflictIndex; ci-- {
+							if r.log[ci].Term != conflictTerm {
+								peer.UpdateNextIndex(ci + 1)
+								break
+							}
+						}
+						// if not found, call InstallSnapshot
+						if ci > conflictIndex {
+							// call InstallSnapshot
+							peer.UpdateNextIndex(r.lastLogIndex() + 1)
+						}
+					}
+				}
+				r.appendEntriesC <- rPack.PeerID
+				return
 			}
-			fmt.Println(isResp)
+
+			if resp.Success {
+				// update nextIndex and matchIndex
+				peer.UpdateNextIndex(resp.MatchIndex + 1)
+				peer.UpdateMatchIndex(resp.MatchIndex)
+			}
 		}
-		return err
 	}
-	if !resp.Success {
-		go func() {
-			_ = r.appendEntries(peer, client)
-		}()
-	}
-	return nil
 }

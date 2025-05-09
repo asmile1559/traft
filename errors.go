@@ -9,4 +9,6 @@ var (
 
 	ErrNeedTruncate = errors.New("need truncate")
 	ErrInvalidIndex = errors.New("invalid index")
+
+	ErrPeerIsNil = errors.New("peer is nil")
 )
