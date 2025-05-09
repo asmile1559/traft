@@ -26,7 +26,7 @@ type RaftNode interface {
 
 	// leader
 	heartbeat(ctx context.Context)
-	appendEntries()
+	appendEntries(ctx context.Context)
 
 	// candidate
 	election()
@@ -75,6 +75,7 @@ type raftNode struct {
 	heartbeatTicker *time.Ticker
 
 	appendEntriesC     chan string // chan of peer id, used to notify append entries
+	installSnapshotC   chan string // chan of peer id, used to notify install snapshot
 	appendEntriesRespC chan *Response
 	// only provide read operation, each peer in raft node has its own mutex.
 	peers map[string]*Peer
