@@ -42,4 +42,12 @@ func (r *raftNode) transitionToLeader() {
 	r.heartbeatTicker.Reset(HeartbeatInterval)
 	// 关闭选举定时器
 	r.electionTimer.Stop()
+
+	// 初始化 nextIndex 和 matchIndex
+	r.nextIndex = make(map[string]uint64)
+	r.matchIndex = make(map[string]uint64)
+	for _, peer := range r.peers {
+		r.nextIndex[peer] = r.lastLogIndex() + 1
+		r.matchIndex[peer] = 0
+	}
 }

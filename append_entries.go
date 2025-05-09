@@ -3,51 +3,9 @@ package traft
 import (
 	"context"
 	"errors"
+	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
-
-// AppendEntries workflow (Follower side):
-//
-// 1. [Term Check]
-//    if req.Term < currentTerm:
-//        [Reject] return false
-//    else if req.Term > currentTerm:
-//        transition to Follower
-//
-// 2. [Role Check]
-//    if role != Follower:
-//        transition to Follower
-//
-// 3. [Reset Election Timer]
-//    electionTimer.reset()
-//
-// 4. [Log Consistency Check]
-//    if req.PrevLogIndex < snapshot.LastIncludedIndex:
-//        [Reject] => ErrLogAlreadySnapshot (need snapshot)
-//
-//    if req.PrevLogIndex >= len(log):
-//        [Reject] => ErrLogOutOfRange (log too short)
-//        => Suggest nextIndex = len(log)
-//
-//    if log[req.PrevLogIndex].Term != req.PrevLogTerm:
-//        [Reject] => ErrLogConflict (term mismatch)
-//        => Return conflictTerm & conflictIndex for fast backoff
-//
-// 5. [Append or Heartbeat Handling]
-//    if len(req.Entries) == 0:
-//        [Accept] => This is a heartbeat
-//        => matchIndex = req.PrevLogIndex
-//
-//    else:
-//        [Accept]
-//        => Truncate conflict entries starting at PrevLogIndex + 1
-//        => Append new entries
-//        => matchIndex = last index of new log
-//
-// 6. [Update Commit Index]
-//    if req.LeaderCommit > commitIndex:
-//        commitIndex = min(req.LeaderCommit, lastLogIndex)
-//        apply entries up to commitIndex to state machine
 
 // AppendEntries is the raft heartbeat and log replication RPC.
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
@@ -65,12 +23,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	}
 
 	// transition to follower when a new term request received
-	if req.Term > r.currentTerm {
-		r.transitionToFollower(req.Term, req.LeaderId)
-	}
-
-	// only follower appends entries
-	if r.role != Follower {
+	if req.Term > r.currentTerm || r.role != Follower {
 		r.transitionToFollower(req.Term, req.LeaderId)
 	}
 
@@ -126,4 +79,46 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 		//r.applyLogToStateMachine()
 	}
 	return resp, nil
+}
+
+// a call chain
+// appendEntries -- not ok --> appendEntries -- not ok --> appendEntries ...
+// |                                |
+// +----- ok ---> exit              +----- ok ---> exit
+func (r *raftNode) appendEntries(peer string, client raftpb.TRaftServiceClient) error {
+	prevLogIndex := r.nextIndex[peer] - 1
+	prevLogTerm, _ := r.getLogTerm(prevLogIndex)
+	logOffset, _ := r.logOffset(prevLogIndex)
+	req := &raftpb.AppendEntriesReq{
+		Term:         r.currentTerm,
+		LeaderId:     r.id,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      r.log[logOffset+1:],
+		LeaderCommit: r.commitIndex,
+	}
+
+	resp, err := client.AppendEntries(context.Background(), req)
+	if err != nil {
+		if errors.Is(err, ErrLogAlreadySnapshot) {
+			// snapshot is needed, update nextIndex
+			r.nextIndex[peer] = r.snapshot.LastIncludedIndex + 1
+			isResp, err := client.InstallSnapshot(context.Background(), &raftpb.InstallSnapshotReq{
+				Term:     r.currentTerm,
+				LeaderId: r.id,
+				Snapshot: r.snapshot,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Println(isResp)
+		}
+		return err
+	}
+	if !resp.Success {
+		go func() {
+			_ = r.appendEntries(peer, client)
+		}()
+	}
+	return nil
 }

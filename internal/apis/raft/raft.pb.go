@@ -422,14 +422,12 @@ func (x *Snapshot) GetData() []byte {
 }
 
 type InstallSnapshotReq struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Term              uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
-	LeaderId          string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
-	LastIncludedIndex uint64                 `protobuf:"varint,3,opt,name=last_included_index,json=lastIncludedIndex,proto3" json:"last_included_index,omitempty"`
-	LastIncludedTerm  uint64                 `protobuf:"varint,4,opt,name=last_included_term,json=lastIncludedTerm,proto3" json:"last_included_term,omitempty"`
-	SnapshotData      []byte                 `protobuf:"bytes,5,opt,name=snapshot_data,json=snapshotData,proto3" json:"snapshot_data,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Term          uint64                 `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
+	LeaderId      string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Snapshot      *Snapshot              `protobuf:"bytes,3,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *InstallSnapshotReq) Reset() {
@@ -476,23 +474,9 @@ func (x *InstallSnapshotReq) GetLeaderId() string {
 	return ""
 }
 
-func (x *InstallSnapshotReq) GetLastIncludedIndex() uint64 {
+func (x *InstallSnapshotReq) GetSnapshot() *Snapshot {
 	if x != nil {
-		return x.LastIncludedIndex
-	}
-	return 0
-}
-
-func (x *InstallSnapshotReq) GetLastIncludedTerm() uint64 {
-	if x != nil {
-		return x.LastIncludedTerm
-	}
-	return 0
-}
-
-func (x *InstallSnapshotReq) GetSnapshotData() []byte {
-	if x != nil {
-		return x.SnapshotData
+		return x.Snapshot
 	}
 	return nil
 }
@@ -584,13 +568,11 @@ const file_raft_proto_rawDesc = "" +
 	"\bSnapshot\x12.\n" +
 	"\x13last_included_index\x18\x01 \x01(\x04R\x11lastIncludedIndex\x12,\n" +
 	"\x12last_included_term\x18\x02 \x01(\x04R\x10lastIncludedTerm\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data\"\xc8\x01\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\"q\n" +
 	"\x12InstallSnapshotReq\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x1b\n" +
-	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12.\n" +
-	"\x13last_included_index\x18\x03 \x01(\x04R\x11lastIncludedIndex\x12,\n" +
-	"\x12last_included_term\x18\x04 \x01(\x04R\x10lastIncludedTerm\x12#\n" +
-	"\rsnapshot_data\x18\x05 \x01(\fR\fsnapshotData\"C\n" +
+	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12*\n" +
+	"\bsnapshot\x18\x03 \x01(\v2\x0e.raft.SnapshotR\bsnapshot\"C\n" +
 	"\x13InstallSnapshotResp\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x04R\x04term\x12\x18\n" +
 	"\asuccess\x18\x02 \x01(\bR\asuccess2\xda\x01\n" +
@@ -624,17 +606,18 @@ var file_raft_proto_goTypes = []any{
 }
 var file_raft_proto_depIdxs = []int32{
 	2, // 0: raft.AppendEntriesReq.entries:type_name -> raft.LogEntry
-	0, // 1: raft.TRaftService.RequestVote:input_type -> raft.RequestVoteReq
-	3, // 2: raft.TRaftService.AppendEntries:input_type -> raft.AppendEntriesReq
-	6, // 3: raft.TRaftService.InstallSnapshot:input_type -> raft.InstallSnapshotReq
-	1, // 4: raft.TRaftService.RequestVote:output_type -> raft.RequestVoteResp
-	4, // 5: raft.TRaftService.AppendEntries:output_type -> raft.AppendEntriesResp
-	7, // 6: raft.TRaftService.InstallSnapshot:output_type -> raft.InstallSnapshotResp
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	5, // 1: raft.InstallSnapshotReq.snapshot:type_name -> raft.Snapshot
+	0, // 2: raft.TRaftService.RequestVote:input_type -> raft.RequestVoteReq
+	3, // 3: raft.TRaftService.AppendEntries:input_type -> raft.AppendEntriesReq
+	6, // 4: raft.TRaftService.InstallSnapshot:input_type -> raft.InstallSnapshotReq
+	1, // 5: raft.TRaftService.RequestVote:output_type -> raft.RequestVoteResp
+	4, // 6: raft.TRaftService.AppendEntries:output_type -> raft.AppendEntriesResp
+	7, // 7: raft.TRaftService.InstallSnapshot:output_type -> raft.InstallSnapshotResp
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_raft_proto_init() }

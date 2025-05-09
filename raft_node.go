@@ -1,6 +1,7 @@
 package traft
 
 import (
+	"context"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 	"sync"
 	"time"
@@ -24,7 +25,8 @@ type RaftNode interface {
 	transitionToLeader()
 
 	// leader
-	heartbeat()
+	heartbeat(ctx context.Context)
+	appendEntries()
 
 	// candidate
 	election()
@@ -75,7 +77,9 @@ type raftNode struct {
 	// when heartbeatTicker expires, send heartbeat to all followers, it used by leader
 	heartbeatTicker *time.Ticker
 
-	peers []string // 其他节点的地址
+	peers          []string                 // 其他节点的地址
+	heartbeatC     map[string]chan struct{} // notify to heartbeat
+	appendEntriesC map[string]chan struct{} // notify to append entries
 
 	mu sync.RWMutex
 }

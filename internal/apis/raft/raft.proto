@@ -54,9 +54,7 @@ message Snapshot {
 message InstallSnapshotReq {
   uint64 term = 1;
   string leader_id = 2;
-  uint64 last_included_index = 3;
-  uint64 last_included_term = 4;
-  bytes snapshot_data = 5;
+  Snapshot snapshot = 3;
 }
 
 message InstallSnapshotResp {
