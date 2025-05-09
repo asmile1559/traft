@@ -13,17 +13,47 @@ const (
 )
 
 type Peer struct {
-	ID         string
-	Address    string
-	NextIndex  uint64
-	MatchIndex uint64
+	id         string
+	address    string
+	nextIndex  uint64
+	matchIndex uint64
 
-	NotifyHeartbeatC         chan struct{}
-	NotifyAppendEntriesC     chan struct{}
-	NotifyAppendEntriesRespC chan *Response
+	notifyHeartbeatC chan struct{}
 
 	cc *grpc.ClientConn
 	l  sync.Mutex
+}
+
+func (p *Peer) Id() string {
+	return p.id
+}
+
+func (p *Peer) WaitHeartbeat() struct{} {
+	return <-p.notifyHeartbeatC
+}
+
+func (p *Peer) MatchIndex() uint64 {
+	p.l.Lock()
+	defer p.l.Unlock()
+	return p.matchIndex
+}
+
+func (p *Peer) SetMatchIndex(matchIndex uint64) {
+	p.l.Lock()
+	defer p.l.Unlock()
+	p.matchIndex = matchIndex
+}
+
+func (p *Peer) NextIndex() uint64 {
+	p.l.Lock()
+	defer p.l.Unlock()
+	return p.nextIndex
+}
+
+func (p *Peer) SetNextIndex(nextIndex uint64) {
+	p.l.Lock()
+	defer p.l.Unlock()
+	p.nextIndex = nextIndex
 }
 
 func NewPeer(ctx context.Context, id, address string) (*Peer, error) {
@@ -34,14 +64,12 @@ func NewPeer(ctx context.Context, id, address string) (*Peer, error) {
 	}
 
 	p := &Peer{
-		ID:                       id,
-		Address:                  address,
-		NextIndex:                0,
-		MatchIndex:               0,
-		NotifyHeartbeatC:         make(chan struct{}, chanSize),
-		NotifyAppendEntriesC:     make(chan struct{}, chanSize),
-		NotifyAppendEntriesRespC: make(chan *Response, chanSize),
-		cc:                       cc,
+		id:               id,
+		address:          address,
+		nextIndex:        0,
+		matchIndex:       0,
+		notifyHeartbeatC: make(chan struct{}, chanSize),
+		cc:               cc,
 	}
 
 	return p, nil
@@ -74,11 +102,23 @@ func (p *Peer) SendRequestVoteRequest(ctx context.Context, req *raftpb.RequestVo
 	return resp, nil
 }
 
+func (p *Peer) UpdateNextIndex(nextIndex uint64) {
+	p.l.Lock()
+	defer p.l.Unlock()
+	p.nextIndex = nextIndex
+}
+
+func (p *Peer) UpdateMatchIndex(matchIndex uint64) {
+	p.l.Lock()
+	defer p.l.Unlock()
+	p.matchIndex = matchIndex
+}
+
 func (p *Peer) Update(nextIndex, matchIndex uint64) {
 	p.l.Lock()
 	defer p.l.Unlock()
-	p.NextIndex = nextIndex
-	p.MatchIndex = matchIndex
+	p.nextIndex = nextIndex
+	p.matchIndex = matchIndex
 	return
 }
 
@@ -92,7 +132,6 @@ func (p *Peer) Close() {
 	if p.cc != nil {
 		_ = p.cc.Close()
 	}
-	close(p.NotifyHeartbeatC)
-	close(p.NotifyAppendEntriesC)
-	close(p.NotifyAppendEntriesRespC)
+	p.cc = nil
+	close(p.notifyHeartbeatC)
 }
