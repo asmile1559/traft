@@ -67,6 +67,22 @@ func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
 	return r.log[i].Term, nil
 }
 
+func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
+	if len(r.log) == 0 {
+		if r.snapshot != nil && term == r.snapshot.LastIncludedTerm {
+			return r.snapshot.LastIncludedIndex, nil
+		}
+		return 0, ErrLogOutOfRange
+	}
+
+	for i := len(r.log) - 1; i >= 0; i-- {
+		if r.log[i].Term == term {
+			return r.log[i].Index, nil
+		}
+	}
+	return 0, ErrLogOutOfRange
+}
+
 // 压缩日志，保留索引大于给定索引的日志条目
 func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
 	// 当前已经交由状态机执行的日志的索引和对应的

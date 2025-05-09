@@ -38,19 +38,74 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 
 	resp.Term = r.currentTerm
 	ok, entry, err := r.checkLogMatch(req.PrevLogTerm, req.PrevLogIndex)
+
 	if !ok {
-		// check log match failed, return false
-		// case 1: need to recover by snapshot(ErrLogAlreadySnapshot)
-		// case 2: resend append entries(ErrLogConflict or ErrLogOutOfRange)
-		if errors.Is(err, ErrLogOutOfRange) {
-			resp.ConflictTerm = r.lastLogTerm()
-			resp.ConflictIndex = r.lastLogIndex()
-		} else if errors.Is(err, ErrLogConflict) {
-			resp.ConflictTerm = entry.Term
-			resp.ConflictIndex = entry.Index
+		if errors.Is(err, ErrLogAlreadySnapshot) {
+			resp.ConflictTerm = 0
+			resp.ConflictIndex = 0
+		} else if errors.Is(err, ErrLogOutOfRange) {
+			resp.ConflictTerm = 0
+			resp.ConflictIndex = r.lastLogIndex() + 1
+		} else {
+			ct := entry.Term
+			ci := entry.Index
+			// find the first log entry whose term is not conflictTerm
+			if r.snapshot != nil {
+				for ; ci > r.snapshot.LastIncludedIndex; ci-- {
+					idx, _ := r.logOffset(ci)
+					if r.log[idx].Term != ct {
+						break
+					}
+				}
+				resp.ConflictTerm = ct
+				resp.ConflictIndex = ci + 1
+			} else {
+				for ; ci < entry.Index; ci-- {
+					if r.log[ci].Term != ct {
+						break
+					}
+				}
+				resp.ConflictTerm = ct
+				resp.ConflictIndex = ci + 1
+			}
 		}
-		return resp, err
+		return resp, nil
 	}
+
+	//if !ok {
+	//	// check log match failed, return false
+	//	// case 1: need to recover by snapshot(ErrLogAlreadySnapshot)
+	//	// case 2: resend append entries(ErrLogConflict or ErrLogOutOfRange)
+	//	if errors.Is(err, ErrLogOutOfRange) {
+	//		resp.ConflictTerm = -1
+	//		resp.ConflictIndex = r.lastLogIndex() + 1
+	//	} else if errors.Is(err, ErrLogConflict) {
+	//		conflictIndex := req.PrevLogIndex
+	//		if r.snapshot != nil {
+	//			// find the first log entry whose term is not conflictTerm
+	//			for ; conflictIndex > r.snapshot.LastIncludedIndex; conflictIndex-- {
+	//				idx, _ := r.logOffset(conflictIndex)
+	//				if r.log[idx].Term != entry.Term {
+	//					break
+	//				}
+	//			}
+	//			resp.ConflictTerm = entry.Term
+	//			resp.ConflictIndex = conflictIndex
+	//		} else {
+	//			// find the first log entry whose term is not conflictTerm
+	//			for ; conflictIndex < r.lastLogIndex(); conflictIndex-- {
+	//				if r.log[conflictIndex].Term != entry.Term {
+	//					break
+	//				}
+	//			}
+	//			// if not found, call InstallSnapshot
+	//			if conflictIndex > req.PrevLogIndex {
+	//			resp.ConflictTerm = entry.Term
+	//			resp.ConflictIndex = conflictIndex
+	//		}
+	//	}
+	//	return resp, err
+	//}
 
 	if errors.Is(err, ErrNeedTruncate) && len(req.Entries) > 0 {
 		// log match, but need to truncate
@@ -63,11 +118,12 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	}
 
 	resp.Success = true
-	resp.MatchIndex = r.lastLogIndex()
+	resp.MatchIndex = req.PrevLogIndex + uint64(len(req.Entries))
 	// update commit index
 	if req.LeaderCommit > r.commitIndex {
 		last := r.lastLogIndex()
 		r.commitIndex = min(req.LeaderCommit, last)
+		// TODO: apply log to state machine
 		//r.applyLogToStateMachine()
 	}
 	return resp, nil
@@ -98,9 +154,11 @@ func (r *raftNode) appendEntries(ctx context.Context) {
 
 func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
 	prevLogIndex := peer.NextIndex() - 1
+	r.mu.RLock()
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
-		// TODO: use snapshot to recover
+		r.installSnapshotC <- peer.Id()
+		r.mu.RUnlock()
 		return
 	}
 	req := &raftpb.AppendEntriesReq{
@@ -111,6 +169,7 @@ func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
 		LeaderCommit: r.commitIndex,
 		Entries:      r.log[prevLogIndex+1:],
 	}
+	r.mu.RUnlock()
 	resp, err := peer.SendAppendEntriesRequest(ctx, req)
 	r.appendEntriesRespC <- &Response{
 		PeerID: peer.Id(),
@@ -132,59 +191,94 @@ func (r *raftNode) processResponse(ctx context.Context) {
 			err := rPack.Err
 			resp := rPack.Resp
 			peer := r.peers[id]
-			if err != nil {
-				if errors.Is(err, ErrLogAlreadySnapshot) {
-					// call InstallSnapshot
-				} else if errors.Is(err, ErrLogOutOfRange) {
-					conflictIndex := resp.ConflictIndex
-					conflictTerm := resp.ConflictTerm
-					term, _ := r.getLogTerm(conflictIndex)
-					if term != conflictTerm {
-						// call InstallSnapshot
-
-						break
-					}
-					peer.Update(conflictIndex+1, conflictIndex)
-				} else if errors.Is(err, ErrLogConflict) {
-					conflictIndex := resp.ConflictIndex
-					conflictTerm := resp.ConflictTerm
-					ci := conflictIndex
-					// find the first log entry whose term is not conflictTerm
-					if r.snapshot != nil {
-						for ; ci > r.snapshot.LastIncludedIndex; ci-- {
-							idx, _ := r.logOffset(ci)
-							if r.log[idx].Term != conflictTerm {
-								peer.UpdateNextIndex(ci + 1)
-								break
-							}
-						}
-						// if not found, call InstallSnapshot
-						if ci == r.snapshot.LastIncludedIndex {
-							peer.UpdateNextIndex(r.snapshot.LastIncludedIndex + 1)
-						}
-					} else {
-						for ; ci < conflictIndex; ci-- {
-							if r.log[ci].Term != conflictTerm {
-								peer.UpdateNextIndex(ci + 1)
-								break
-							}
-						}
-						// if not found, call InstallSnapshot
-						if ci > conflictIndex {
-							// call InstallSnapshot
-							peer.UpdateNextIndex(r.lastLogIndex() + 1)
-						}
-					}
-				}
-				r.appendEntriesC <- rPack.PeerID
+			if resp.Term > r.currentTerm {
+				// update current term and transition to follower
+				r.transitionToFollower(resp.Term, VotedForNone)
 				return
 			}
-
+			//if err != nil {
+			//	if errors.Is(err, ErrLogAlreadySnapshot) {
+			//		r.installSnapshotC <- id
+			//		return
+			//	} else if errors.Is(err, ErrLogOutOfRange) {
+			//		conflictIndex := resp.ConflictIndex
+			//		conflictTerm := resp.ConflictTerm
+			//		term, _ := r.getLogTerm(conflictIndex)
+			//		if term != conflictTerm {
+			//			r.installSnapshotC <- id
+			//			return
+			//		}
+			//		peer.Update(conflictIndex+1, conflictIndex)
+			//	} else if errors.Is(err, ErrLogConflict) {
+			//		conflictIndex := resp.ConflictIndex
+			//		conflictTerm := resp.ConflictTerm
+			//		ci := conflictIndex
+			//		// find the first log entry whose term is not conflictTerm
+			//		if r.snapshot != nil {
+			//			for ; ci > r.snapshot.LastIncludedIndex; ci-- {
+			//				idx, _ := r.logOffset(ci)
+			//				if r.log[idx].Term != conflictTerm {
+			//					peer.UpdateNextIndex(ci + 1)
+			//					break
+			//				}
+			//			}
+			//			// if not found, call InstallSnapshot
+			//			if ci == r.snapshot.LastIncludedIndex {
+			//				peer.UpdateNextIndex(r.snapshot.LastIncludedIndex + 1)
+			//			}
+			//		} else {
+			//			for ; ci < conflictIndex; ci-- {
+			//				if r.log[ci].Term != conflictTerm {
+			//					peer.UpdateNextIndex(ci + 1)
+			//					break
+			//				}
+			//			}
+			//			// if not found, call InstallSnapshot
+			//			if ci > conflictIndex {
+			//				// call InstallSnapshot
+			//				peer.UpdateNextIndex(r.lastLogIndex() + 1)
+			//				r.installSnapshotC <- id
+			//				return
+			//			}
+			//		}
+			//	}
+			//	r.appendEntriesC <- rPack.PeerID
+			//	return
+			//}
 			if resp.Success {
 				// update nextIndex and matchIndex
 				peer.UpdateNextIndex(resp.MatchIndex + 1)
 				peer.UpdateMatchIndex(resp.MatchIndex)
+				return
 			}
+
+			if resp.ConflictTerm == 0 && resp.ConflictIndex == 0 {
+				// use snapshot to recover
+				r.installSnapshotC <- id
+				return
+			}
+
+			if resp.ConflictTerm == 0 {
+				peer.UpdateNextIndex(resp.ConflictIndex)
+				// call appendEntries again
+				r.appendEntriesC <- id
+				return
+			}
+
+			_, err = r.getLogTerm(resp.ConflictIndex)
+			if err != nil {
+				peer.UpdateNextIndex(resp.ConflictIndex)
+			} else {
+				ct := resp.ConflictTerm
+
+				li, err := r.lastIndexOf(ct)
+				if err != nil {
+					r.installSnapshotC <- peer.Id()
+					return
+				}
+				peer.UpdateNextIndex(li + 1)
+			}
+			r.appendEntriesC <- id
 		}
 	}
 }

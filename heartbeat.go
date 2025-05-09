@@ -43,9 +43,8 @@ func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {
 		prevLogIndex := peer.NextIndex() - 1
 		prevLogTerm, err := r.getLogTerm(prevLogIndex)
 		if err != nil {
-			// this case should not happen
-			// TODO: use snapshot to recover
-			panic(err)
+			r.installSnapshotC <- peer.Id()
+			return
 		}
 		req := &raftpb.AppendEntriesReq{
 			Term:         r.currentTerm,
