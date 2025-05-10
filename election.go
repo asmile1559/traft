@@ -8,7 +8,19 @@ import (
 )
 
 // 选举函数，用于处理选举逻辑，不加锁，该函数会在选举超时后被调用，不会并发执行
-func (r *raftNode) election() {
+func (r *raftNode) election(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-r.electionTimer.C:
+			r.transitionToCandidate()
+			r.startElection(ctx)
+		}
+	}
+}
+
+func (r *raftNode) startElection(ctx context.Context) {
 	// 如果当前角色不是 candidate，直接返回
 	if r.role != Candidate {
 		return
@@ -24,7 +36,8 @@ func (r *raftNode) election() {
 		LastLogTerm:  r.lastLogTerm(),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
 	wg := sync.WaitGroup{}

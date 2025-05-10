@@ -12,7 +12,7 @@ type Persister interface {
 	SaveMetadata(term uint64, votedFor string) error
 	LoadMetadata() (term uint64, votedFor string, err error)
 
-	SaveLogEntries(entries []*raftpb.LogEntry, firstIndex uint64) error
+	SaveLogEntries(entries []*raftpb.LogEntry) error
 	LoadLogEntries() ([]*raftpb.LogEntry, uint64, error)
 
 	SaveSnapshot(snapshot *raftpb.Snapshot) error
@@ -80,7 +80,7 @@ func (p *FilePersister) LoadMetadata() (term uint64, votedFor string, err error)
 	return metadata.Term, metadata.VotedFor, err
 }
 
-func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry, firstIndex uint64) error {
+func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry) error {
 	fName := time.Now().Format("060102150405") + ".log"
 	f, err := os.Create(filepath.Join(p.dir, fName))
 	if err != nil {
@@ -92,9 +92,8 @@ func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry, firstIndex ui
 
 	enc := gob.NewEncoder(f)
 	err = enc.Encode(struct {
-		FirstIndex uint64
-		Entries    []*raftpb.LogEntry
-	}{FirstIndex: firstIndex, Entries: entries})
+		Entries []*raftpb.LogEntry
+	}{Entries: entries})
 
 	if err != nil {
 		return err

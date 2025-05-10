@@ -56,7 +56,7 @@ func (p *Peer) SetNextIndex(nextIndex uint64) {
 	p.nextIndex = nextIndex
 }
 
-func NewPeer(ctx context.Context, id, address string) (*Peer, error) {
+func NewPeer(id, address string) (*Peer, error) {
 	cc, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
