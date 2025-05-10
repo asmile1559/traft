@@ -64,7 +64,7 @@ type raftNode struct {
 	stateMachine StateMachine // 状态机接口，用于执行日志条目
 
 	// used for persisting data
-	// persister Persister // 持久化接口，持久化数据
+	persister Persister // 持久化接口，持久化数据
 
 	// 选举定时器
 	// when electionTimer expires, start a new election, it used by follower and candidate

@@ -50,7 +50,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	r.lastApplied = req.Snapshot.LastIncludedIndex
 
 	resp.Success = true
-	return nil, nil
+	return resp, nil
 }
 
 func (r *raftNode) installSnapshot(ctx context.Context) {
