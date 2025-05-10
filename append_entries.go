@@ -123,7 +123,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	if req.LeaderCommit > r.commitIndex {
 		last := r.lastLogIndex()
 		r.commitIndex = min(req.LeaderCommit, last)
-		r.applyStateMachine(ctx)
+		r.applyC <- struct{}{}
 	}
 	r.persister.SaveLogEntries(r.log)
 	return resp, nil

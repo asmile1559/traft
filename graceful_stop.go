@@ -16,7 +16,6 @@ func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener) {
 		os.Interrupt,
 		syscall.SIGTERM,
 		syscall.SIGQUIT,
-		syscall.SIGKILL,
 	)
 
 	// wait for the signal

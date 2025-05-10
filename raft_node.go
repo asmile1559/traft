@@ -35,6 +35,9 @@ type RaftNode interface {
 
 	// Start the raft node
 	Start() error
+
+	// recover the raft node
+	Recover() error
 }
 
 type raftNode struct {
@@ -151,6 +154,8 @@ func (r *raftNode) Start() error {
 	go r.processResponse(ctx)
 	// start install snapshot
 	go r.installSnapshot(ctx)
+	// start apply log
+	go r.applyStateMachine(ctx)
 
 	server := grpc.NewServer()
 	raftpb.RegisterTRaftServiceServer(server, r)
@@ -165,5 +170,26 @@ func (r *raftNode) Start() error {
 	}()
 
 	r.gracefulStop(server, listener)
+	return nil
+}
+
+func (r *raftNode) Recover() error {
+	term, votedFor, err := r.persister.LoadMetadata()
+	if err != nil {
+		return err
+	}
+	r.currentTerm = term
+	r.votedFor = votedFor
+	entries, err := r.persister.LoadLogEntries()
+	if err != nil {
+		return err
+	}
+	r.log = entries
+	snapshot, err := r.persister.LoadSnapshot()
+	if err != nil {
+		return err
+	}
+	r.snapshot = snapshot
+	_ = r.stateMachine.ApplySnapshot(snapshot.Data)
 	return nil
 }
