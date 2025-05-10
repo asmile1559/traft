@@ -31,6 +31,8 @@ func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener) {
 	close(r.appendEntriesRespC)
 	// 关闭 installSnapshotC 通道
 	close(r.installSnapshotC)
+	// 关闭 applyC 通道
+	close(r.applyC)
 
 	// 关闭所有的 peer
 	for _, peer := range r.peers {

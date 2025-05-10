@@ -1,6 +1,9 @@
 package traft
 
-import "context"
+import (
+	"context"
+	raftpb "github.com/asmile1559/traft/internal/apis/raft"
+)
 
 func (r *raftNode) applyStateMachine(ctx context.Context) {
 	for {
@@ -23,7 +26,7 @@ func (r *raftNode) applyLogToStateMachine() {
 
 	begin, _ := r.logOffset(r.lastApplied + 1)
 	end, _ := r.logOffset(r.commitIndex + 1)
-	logs := r.log[begin:end]
+	logs := append(make([]*raftpb.LogEntry, 0), r.log[begin:end]...)
 	r.mu.RUnlock()
 	for _, log := range logs {
 		_ = r.stateMachine.ApplyLog(log.Data)
