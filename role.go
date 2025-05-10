@@ -31,6 +31,11 @@ func (r *raftNode) transitionToCandidate() {
 	// 重置选票
 	r.votedFor = r.id
 	// 开启选举定时器
+	err := r.persister.SaveMetadata(r.currentTerm, r.votedFor)
+	if err != nil {
+		// TODO: 处理错误
+		panic(err)
+	}
 	r.electionTimer.Reset(RandomElectionTimeout())
 	// 关闭心跳定时器
 	r.heartbeatTicker.Stop()
@@ -43,11 +48,12 @@ func (r *raftNode) transitionToLeader() {
 	// 关闭选举定时器
 	r.electionTimer.Stop()
 
-	r.mu.Lock()
+	r.mu.RLock()
 	nextIndex := r.lastLogIndex() + 1
 	// 初始化 nextIndex 和 matchIndex
 	for _, peer := range r.peers {
 		peer.Reset(nextIndex)
 	}
-	r.mu.Unlock()
+	_ = r.persister.SaveMetadata(r.currentTerm, r.votedFor)
+	r.mu.RUnlock()
 }

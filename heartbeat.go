@@ -18,20 +18,24 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 			return
 		case <-r.heartbeatTicker.C:
 			// if the ticker stops, it will not send heartbeats
-			wg := sync.WaitGroup{}
-			for _, peer := range r.peers {
-				wg.Add(1)
-				go func(peer *Peer) {
-					defer wg.Done()
-					peer.notifyHeartbeatC <- struct{}{}
-				}(peer)
+			if r.role != Leader {
+				continue
 			}
-			wg.Wait()
+			r.startHeartbeat()
 		}
 	}
+}
 
-	// clean resources
-
+func (r *raftNode) startHeartbeat() {
+	wg := sync.WaitGroup{}
+	for _, peer := range r.peers {
+		wg.Add(1)
+		go func(peer *Peer) {
+			defer wg.Done()
+			peer.notifyHeartbeatC <- struct{}{}
+		}(peer)
+	}
+	wg.Wait()
 }
 
 func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {

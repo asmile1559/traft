@@ -49,6 +49,8 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	r.commitIndex = req.Snapshot.LastIncludedIndex
 	r.lastApplied = req.Snapshot.LastIncludedIndex
 
+	_ = r.persister.SaveSnapshot(r.snapshot)
+	_ = r.persister.SaveLogEntries(r.log)
 	resp.Success = true
 	return resp, nil
 }
@@ -69,6 +71,9 @@ func (r *raftNode) installSnapshot(ctx context.Context) {
 
 func (r *raftNode) installSnapshotPeer(ctx context.Context, peer *Peer) {
 	r.mu.RLock()
+	if r.snapshot == nil {
+		_, _ = r.compactLog()
+	}
 	req := &raftpb.InstallSnapshotReq{
 		Term:     r.currentTerm,
 		LeaderId: r.id,

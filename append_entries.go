@@ -123,9 +123,9 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	if req.LeaderCommit > r.commitIndex {
 		last := r.lastLogIndex()
 		r.commitIndex = min(req.LeaderCommit, last)
-		// TODO: apply log to state machine
-		//r.applyLogToStateMachine()
+		r.applyStateMachine(ctx)
 	}
+	r.persister.SaveLogEntries(r.log)
 	return resp, nil
 }
 

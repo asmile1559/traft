@@ -99,7 +99,10 @@ func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
 	snapshot.Data = snapshotData
 	// 更新节点的快照
 	r.snapshot = snapshot
-	// TODO: persist snapshot to disk
+	err := r.persister.SaveSnapshot(snapshot)
+	if err != nil {
+		panic(err)
+	}
 
 	i, err := r.logOffset(index)
 	if err != nil {
