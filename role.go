@@ -48,12 +48,12 @@ func (r *raftNode) transitionToLeader() {
 	// 关闭选举定时器
 	r.electionTimer.Stop()
 
-	r.mu.RLock()
+	r.mu.Lock()
 	nextIndex := r.lastLogIndex() + 1
 	// 初始化 nextIndex 和 matchIndex
 	for _, peer := range r.peers {
 		peer.Reset(nextIndex)
 	}
 	_ = r.persister.SaveMetadata(r.currentTerm, r.votedFor)
-	r.mu.RUnlock()
+	r.mu.Unlock()
 }

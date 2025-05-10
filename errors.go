@@ -12,7 +12,8 @@ var (
 
 	ErrPeerIsNil = errors.New("peer is nil")
 
-	ErrNoMetadataPersisted = errors.New("no metadata persisted")
-	ErrNoLogPersisted      = errors.New("no log persisted")
-	ErrNoSnapshotPersisted = errors.New("no snapshot persisted")
+	ErrPersisterDirNotExist = errors.New("persister dir not exist")
+	ErrNoMetadataPersisted  = errors.New("no metadata persisted")
+	ErrNoLogPersisted       = errors.New("no log persisted")
+	ErrNoSnapshotPersisted  = errors.New("no snapshot persisted")
 )

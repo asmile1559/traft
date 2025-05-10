@@ -14,16 +14,18 @@ func (r *raftNode) applyStateMachine(ctx context.Context) {
 }
 
 func (r *raftNode) applyLogToStateMachine() {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 
+	r.mu.RLock()
 	if r.lastApplied >= r.commitIndex {
+		r.mu.RUnlock()
 		return
 	}
 
-	for i := r.lastApplied + 1; i <= r.commitIndex; i++ {
-		oi, _ := r.logOffset(i)
-		entry := r.log[oi]
-		_ = r.stateMachine.ApplyLog(entry.Data)
+	begin, _ := r.logOffset(r.lastApplied + 1)
+	end, _ := r.logOffset(r.commitIndex + 1)
+	logs := r.log[begin:end]
+	r.mu.RUnlock()
+	for _, log := range logs {
+		_ = r.stateMachine.ApplyLog(log.Data)
 	}
 }

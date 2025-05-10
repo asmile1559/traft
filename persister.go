@@ -8,12 +8,20 @@ import (
 	"time"
 )
 
+type PFileType string
+
+const (
+	PMetadataFile PFileType = "metadata"
+	PLogFile      PFileType = "log"
+	PSnapshotFile PFileType = "snapshot"
+)
+
 type Persister interface {
 	SaveMetadata(term uint64, votedFor string) error
 	LoadMetadata() (term uint64, votedFor string, err error)
 
 	SaveLogEntries(entries []*raftpb.LogEntry) error
-	LoadLogEntries() ([]*raftpb.LogEntry, uint64, error)
+	LoadLogEntries() ([]*raftpb.LogEntry, error)
 
 	SaveSnapshot(snapshot *raftpb.Snapshot) error
 	LoadSnapshot() (*raftpb.Snapshot, error)
@@ -33,6 +41,36 @@ func NewFilePersister(dir string) *FilePersister {
 		panic(err)
 	}
 	return &FilePersister{dir: dir}
+}
+
+func (p *FilePersister) checkBeforeLoad(t PFileType) (string, error) {
+	switch t {
+	case PMetadataFile:
+		if p.metadataFile == "" && p.dir == "" {
+			return "", ErrNoMetadataPersisted
+		}
+	case PLogFile:
+		if p.logFile == "" && p.dir == "" {
+			return "", ErrNoLogPersisted
+		}
+	case PSnapshotFile:
+		if p.snapshotFile == "" && p.dir == "" {
+			return "", ErrNoSnapshotPersisted
+		}
+	}
+	file, err := GetLatestFile(p.dir, t)
+	if err != nil {
+		return "", err
+	}
+	switch t {
+	case PMetadataFile:
+		p.metadataFile = file
+	case PLogFile:
+		p.logFile = file
+	case PSnapshotFile:
+		p.snapshotFile = file
+	}
+	return file, nil
 }
 
 func (p *FilePersister) SaveMetadata(term uint64, votedFor string) error {
@@ -59,9 +97,10 @@ func (p *FilePersister) SaveMetadata(term uint64, votedFor string) error {
 	return nil
 }
 
-func (p *FilePersister) LoadMetadata() (term uint64, votedFor string, err error) {
-	if p.metadataFile == "" {
-		return 0, "", ErrNoMetadataPersisted
+func (p *FilePersister) LoadMetadata() (uint64, string, error) {
+	_, err := p.checkBeforeLoad(PMetadataFile)
+	if err != nil {
+		return 0, "", err
 	}
 	f, err := os.Open(p.metadataFile)
 	if err != nil {
@@ -91,9 +130,7 @@ func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry) error {
 	}(f)
 
 	enc := gob.NewEncoder(f)
-	err = enc.Encode(struct {
-		Entries []*raftpb.LogEntry
-	}{Entries: entries})
+	err = enc.Encode(entries)
 
 	if err != nil {
 		return err
@@ -103,25 +140,23 @@ func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry) error {
 	return nil
 }
 
-func (p *FilePersister) LoadLogEntries() ([]*raftpb.LogEntry, uint64, error) {
-	if p.logFile == "" {
-		return nil, 0, ErrNoLogPersisted
+func (p *FilePersister) LoadLogEntries() ([]*raftpb.LogEntry, error) {
+	_, err := p.checkBeforeLoad(PLogFile)
+	if err != nil {
+		return nil, err
 	}
 	f, err := os.Open(p.logFile)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	defer func(f *os.File) {
 		_ = f.Close()
 	}(f)
 
 	dec := gob.NewDecoder(f)
-	var logData struct {
-		FirstIndex uint64
-		Entries    []*raftpb.LogEntry
-	}
-	err = dec.Decode(&logData)
-	return logData.Entries, logData.FirstIndex, err
+	var entries []*raftpb.LogEntry
+	err = dec.Decode(&entries)
+	return entries, err
 }
 
 func (p *FilePersister) SaveSnapshot(snapshot *raftpb.Snapshot) error {
@@ -145,8 +180,9 @@ func (p *FilePersister) SaveSnapshot(snapshot *raftpb.Snapshot) error {
 }
 
 func (p *FilePersister) LoadSnapshot() (*raftpb.Snapshot, error) {
-	if p.snapshotFile == "" {
-		return nil, ErrNoSnapshotPersisted
+	_, err := p.checkBeforeLoad(PSnapshotFile)
+	if err != nil {
+		return nil, err
 	}
 	f, err := os.Open(p.snapshotFile)
 	if err != nil {
