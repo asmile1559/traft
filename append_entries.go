@@ -18,6 +18,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.logger.Debug("received AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
 	resp := &raftpb.AppendEntriesResp{
 		Term:    r.currentTerm,
 		Success: false,
@@ -25,6 +26,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 
 	// reject when an old term request received
 	if req.Term < r.currentTerm {
+		r.logger.Debug("reject AppendEntries request cause old term", "term", req.Term, "currentTerm", r.currentTerm)
 		return resp, nil
 	}
 
@@ -41,12 +43,15 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 
 	if !ok {
 		if errors.Is(err, ErrLogAlreadySnapshot) {
+			r.logger.Debug("reject AppendEntries request cause log already snapshot")
 			resp.ConflictTerm = 0
 			resp.ConflictIndex = 0
 		} else if errors.Is(err, ErrLogOutOfRange) {
+			r.logger.Debug("reject AppendEntries request cause log out of range")
 			resp.ConflictTerm = 0
 			resp.ConflictIndex = r.lastLogIndex() + 1
 		} else {
+			r.logger.Debug("reject AppendEntries request cause log not match")
 			ct := entry.Term
 			ci := entry.Index
 			// find the first log entry whose term is not conflictTerm
@@ -72,41 +77,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 		return resp, nil
 	}
 
-	//if !ok {
-	//	// check log match failed, return false
-	//	// case 1: need to recover by snapshot(ErrLogAlreadySnapshot)
-	//	// case 2: resend append entries(ErrLogConflict or ErrLogOutOfRange)
-	//	if errors.Is(err, ErrLogOutOfRange) {
-	//		resp.ConflictTerm = -1
-	//		resp.ConflictIndex = r.lastLogIndex() + 1
-	//	} else if errors.Is(err, ErrLogConflict) {
-	//		conflictIndex := req.PrevLogIndex
-	//		if r.snapshot != nil {
-	//			// find the first log entry whose term is not conflictTerm
-	//			for ; conflictIndex > r.snapshot.LastIncludedIndex; conflictIndex-- {
-	//				idx, _ := r.logOffset(conflictIndex)
-	//				if r.log[idx].Term != entry.Term {
-	//					break
-	//				}
-	//			}
-	//			resp.ConflictTerm = entry.Term
-	//			resp.ConflictIndex = conflictIndex
-	//		} else {
-	//			// find the first log entry whose term is not conflictTerm
-	//			for ; conflictIndex < r.lastLogIndex(); conflictIndex-- {
-	//				if r.log[conflictIndex].Term != entry.Term {
-	//					break
-	//				}
-	//			}
-	//			// if not found, call InstallSnapshot
-	//			if conflictIndex > req.PrevLogIndex {
-	//			resp.ConflictTerm = entry.Term
-	//			resp.ConflictIndex = conflictIndex
-	//		}
-	//	}
-	//	return resp, err
-	//}
-
+	r.logger.Debug("success AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
 	if errors.Is(err, ErrNeedTruncate) && len(req.Entries) > 0 {
 		// log match, but need to truncate
 		_ = r.truncateLog(req.PrevLogIndex)
@@ -141,6 +112,7 @@ func (r *raftNode) appendEntries(ctx context.Context) {
 			return
 		case p := <-r.appendEntriesC:
 			// send append entries to peer
+			r.logger.Debug("send append entries to peer", "peerId", p)
 			peer := r.peers[p]
 			if peer == nil {
 				// TODO: use other method to handle this error
@@ -153,6 +125,8 @@ func (r *raftNode) appendEntries(ctx context.Context) {
 }
 
 func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
+	r.logger.Debug("enter append entries to peer", "peerId", peer.Id())
+	defer r.logger.Debug("exit append entries to peer", "peerId", peer.Id())
 	prevLogIndex := peer.NextIndex() - 1
 	r.mu.RLock()
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
@@ -187,6 +161,7 @@ func (r *raftNode) processResponse(ctx context.Context) {
 			// TODO: clean resources
 			return
 		case rPack := <-r.appendEntriesRespC:
+			r.logger.Debug("receive append entries response from peer", "peerId", rPack.PeerID)
 			id := rPack.PeerID
 			err := rPack.Err
 			resp := rPack.Resp
@@ -196,56 +171,9 @@ func (r *raftNode) processResponse(ctx context.Context) {
 				r.transitionToFollower(resp.Term, VotedForNone)
 				return
 			}
-			//if err != nil {
-			//	if errors.Is(err, ErrLogAlreadySnapshot) {
-			//		r.installSnapshotC <- id
-			//		return
-			//	} else if errors.Is(err, ErrLogOutOfRange) {
-			//		conflictIndex := resp.ConflictIndex
-			//		conflictTerm := resp.ConflictTerm
-			//		term, _ := r.getLogTerm(conflictIndex)
-			//		if term != conflictTerm {
-			//			r.installSnapshotC <- id
-			//			return
-			//		}
-			//		peer.Update(conflictIndex+1, conflictIndex)
-			//	} else if errors.Is(err, ErrLogConflict) {
-			//		conflictIndex := resp.ConflictIndex
-			//		conflictTerm := resp.ConflictTerm
-			//		ci := conflictIndex
-			//		// find the first log entry whose term is not conflictTerm
-			//		if r.snapshot != nil {
-			//			for ; ci > r.snapshot.LastIncludedIndex; ci-- {
-			//				idx, _ := r.logOffset(ci)
-			//				if r.log[idx].Term != conflictTerm {
-			//					peer.UpdateNextIndex(ci + 1)
-			//					break
-			//				}
-			//			}
-			//			// if not found, call InstallSnapshot
-			//			if ci == r.snapshot.LastIncludedIndex {
-			//				peer.UpdateNextIndex(r.snapshot.LastIncludedIndex + 1)
-			//			}
-			//		} else {
-			//			for ; ci < conflictIndex; ci-- {
-			//				if r.log[ci].Term != conflictTerm {
-			//					peer.UpdateNextIndex(ci + 1)
-			//					break
-			//				}
-			//			}
-			//			// if not found, call InstallSnapshot
-			//			if ci > conflictIndex {
-			//				// call InstallSnapshot
-			//				peer.UpdateNextIndex(r.lastLogIndex() + 1)
-			//				r.installSnapshotC <- id
-			//				return
-			//			}
-			//		}
-			//	}
-			//	r.appendEntriesC <- rPack.PeerID
-			//	return
-			//}
+
 			if resp.Success {
+				r.logger.Debug("success append entries response from peer", "peerId", id)
 				// update nextIndex and matchIndex
 				peer.UpdateNextIndex(resp.MatchIndex + 1)
 				peer.UpdateMatchIndex(resp.MatchIndex)
@@ -253,12 +181,14 @@ func (r *raftNode) processResponse(ctx context.Context) {
 			}
 
 			if resp.ConflictTerm == 0 && resp.ConflictIndex == 0 {
+				r.logger.Debug("reject, use install snapshot", "peerId", id)
 				// use snapshot to recover
 				r.installSnapshotC <- id
 				return
 			}
 
 			if resp.ConflictTerm == 0 {
+				r.logger.Debug("reject, reset nextIndex", "peerId", id)
 				peer.UpdateNextIndex(resp.ConflictIndex)
 				// call appendEntries again
 				r.appendEntriesC <- id

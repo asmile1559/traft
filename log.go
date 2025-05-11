@@ -92,6 +92,8 @@ func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
 	// term:   1, 1, 2, 2, 2, 3,  3,  3,  4,  4
 	//                     Δ          <- - - idx
 	//                   target
+	// Start from the last log entry and iterate backward, excluding index 0.
+	// Index 0 is excluded because it is a dummy log entry (see lines 11-12).
 	for idx := n - 1; idx > 0; idx-- {
 		if r.log[idx].Term == term {
 			return r.log[idx].Index, nil

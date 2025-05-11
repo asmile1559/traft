@@ -9,6 +9,7 @@ var (
 
 	ErrNeedTruncate = errors.New("need truncate")
 	ErrInvalidIndex = errors.New("invalid index")
+	ErrInvalidTerm  = errors.New("invalid term")
 
 	ErrPeerIsNil = errors.New("peer is nil")
 
@@ -16,4 +17,6 @@ var (
 	ErrNoMetadataPersisted  = errors.New("no metadata persisted")
 	ErrNoLogPersisted       = errors.New("no log persisted")
 	ErrNoSnapshotPersisted  = errors.New("no snapshot persisted")
+
+	ErrUnknownKVStateMachineOperation = errors.New("unknown kv state machine operation")
 )

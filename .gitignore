@@ -3,5 +3,6 @@
 .config
 
 changelogs
+test
 
 go.sum

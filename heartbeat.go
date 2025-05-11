@@ -8,6 +8,8 @@ import (
 
 func (r *raftNode) heartbeat(ctx context.Context) {
 	// 发送心跳
+	r.logger.Debug("init heartbeat")
+	defer r.logger.Debug("exit heartbeat")
 	for _, peer := range r.peers {
 		go r.heartbeatPeer(ctx, peer)
 	}
@@ -21,6 +23,7 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 			if r.role != Leader {
 				continue
 			}
+			r.logger.Debug("send heartbeat")
 			r.startHeartbeat()
 		}
 	}
@@ -32,7 +35,7 @@ func (r *raftNode) startHeartbeat() {
 		wg.Add(1)
 		go func(peer *Peer) {
 			defer wg.Done()
-			peer.notifyHeartbeatC <- struct{}{}
+			peer.NotifyHeartbeat()
 		}(peer)
 	}
 	wg.Wait()
@@ -43,7 +46,8 @@ func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {
 	case <-ctx.Done():
 		// TODO: clean resources
 		return
-	case <-peer.notifyHeartbeatC:
+	case <-peer.RecvNotifyHeartbeatChan():
+		r.logger.Debug("received heartbeat")
 		prevLogIndex := peer.NextIndex() - 1
 		prevLogTerm, err := r.getLogTerm(prevLogIndex)
 		if err != nil {

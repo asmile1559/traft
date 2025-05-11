@@ -28,8 +28,12 @@ func (p *Peer) Id() string {
 	return p.id
 }
 
-func (p *Peer) WaitHeartbeat() struct{} {
-	return <-p.notifyHeartbeatC
+func (p *Peer) NotifyHeartbeat() {
+	p.notifyHeartbeatC <- struct{}{}
+}
+
+func (p *Peer) RecvNotifyHeartbeatChan() <-chan struct{} {
+	return p.notifyHeartbeatC
 }
 
 func (p *Peer) MatchIndex() uint64 {

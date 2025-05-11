@@ -8,7 +8,8 @@ import (
 func (r *raftNode) RequestVote(ctx context.Context, req *raftpb.RequestVoteReq) (*raftpb.RequestVoteResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
+	r.logger.Debug("received RequestVote", "req", req)
+	defer r.logger.Debug("completed RequestVote", "req", req)
 	resp := &raftpb.RequestVoteResp{
 		Term:        r.currentTerm,
 		VoteGranted: false,

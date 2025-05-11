@@ -4,7 +4,9 @@ import (
 	"context"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 	"google.golang.org/grpc"
+	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -83,6 +85,8 @@ type raftNode struct {
 	appendEntriesRespC chan *Response
 	// only provide read operation, each peer in raft node has its own mutex.
 	peers map[string]*Peer
+
+	logger *slog.Logger
 }
 
 type Config struct {
@@ -118,6 +122,16 @@ func New(config *Config) RaftNode {
 
 	peerCount := len(peers)
 
+	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	})
+
+	logger := slog.New(h).With(
+		"raft_id", config.Id,
+		"raft_addr", config.Addr,
+	)
+
 	return &raftNode{
 		id:                 config.Id,
 		addr:               config.Addr,
@@ -137,10 +151,13 @@ func New(config *Config) RaftNode {
 		appendEntriesRespC: make(chan *Response, 2*peerCount),
 		installSnapshotC:   make(chan string, 2*peerCount),
 		peers:              peers,
+		logger:             logger,
 	}
 }
 
 func (r *raftNode) Start() error {
+	r.logger.Debug("start raft node")
+	defer r.logger.Debug("finish raft node")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

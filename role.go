@@ -13,6 +13,8 @@ func (r *raftNode) Role() Role {
 }
 
 func (r *raftNode) transitionToFollower(term uint64, votedFor string) {
+	r.logger.Debug("start transition to follower")
+	defer r.logger.Debug("finish transition to follower")
 	r.role = Follower
 	// 更新当前任期
 	r.currentTerm = term
@@ -25,6 +27,8 @@ func (r *raftNode) transitionToFollower(term uint64, votedFor string) {
 }
 
 func (r *raftNode) transitionToCandidate() {
+	r.logger.Debug("start transition to candidate")
+	defer r.logger.Debug("finish transition to candidate")
 	r.role = Candidate
 	// 更新当前任期
 	r.currentTerm++
@@ -42,6 +46,8 @@ func (r *raftNode) transitionToCandidate() {
 }
 
 func (r *raftNode) transitionToLeader() {
+	r.logger.Debug("start transition to leader")
+	defer r.logger.Debug("finish transition to leader")
 	r.role = Leader
 	// 开启心跳定时器
 	r.heartbeatTicker.Reset(HeartbeatInterval)

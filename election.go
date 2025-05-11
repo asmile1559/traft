@@ -9,6 +9,8 @@ import (
 
 // 选举函数，用于处理选举逻辑，不加锁，该函数会在选举超时后被调用，不会并发执行
 func (r *raftNode) election(ctx context.Context) {
+	r.logger.Debug("init election")
+	defer r.logger.Debug("exit election")
 	for {
 		select {
 		case <-ctx.Done():
@@ -21,8 +23,10 @@ func (r *raftNode) election(ctx context.Context) {
 }
 
 func (r *raftNode) startElection(ctx context.Context) {
+	r.logger.Debug("start election")
 	// 如果当前角色不是 candidate，直接返回
 	if r.role != Candidate {
+		r.logger.Warn("election role is not Candidate")
 		return
 	}
 
@@ -61,6 +65,7 @@ func (r *raftNode) startElection(ctx context.Context) {
 			// 如果收到的任期比当前任期大，转化为 follower
 			r.transitionToFollower(resp.Term, VotedForNone)
 			cancel()
+			r.logger.Debug("election complete, become follower")
 			return
 		}
 		if resp.VoteGranted {
@@ -68,6 +73,7 @@ func (r *raftNode) startElection(ctx context.Context) {
 			if grantedVotes > totalVotes/2 {
 				// 获得了大多数的投票，成为领导者
 				r.transitionToLeader()
+				r.logger.Debug("election complete, become leader")
 				cancel()
 				return
 			}
@@ -76,6 +82,7 @@ func (r *raftNode) startElection(ctx context.Context) {
 
 	// 如果没有获得足够的投票，继续等待选举超时
 	if r.role == Candidate {
+		r.logger.Debug("election complete, as candidate")
 		r.electionTimer.Reset(RandomElectionTimeout())
 	}
 }

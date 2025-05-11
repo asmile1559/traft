@@ -1,12 +1,27 @@
 package traft
 
 import (
+	"log/slog"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const (
+	LoggerLevel = slog.LevelDebug
+)
+
+func SetLogger() {
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     LoggerLevel,
+	})
+
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+}
 
 func RandomElectionTimeout() time.Duration {
 	// 随机选举超时时间，范围在 [150ms, 300ms]
@@ -56,5 +71,5 @@ func GetLatestFile(dir string, t PFileType) (string, error) {
 	if target == "" {
 		return "", err
 	}
-	return filepath.Join(dir, target), err
+	return filepath.Join(dir, target), nil
 }
