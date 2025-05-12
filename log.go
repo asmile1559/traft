@@ -1,145 +1,212 @@
 package traft
 
-import raftpb "github.com/asmile1559/traft/internal/apis/raft"
+import (
+	"errors"
+	raftpb "github.com/asmile1559/traft/internal/apis/raft"
+)
 
 // In this file, all functions designed lock-free because they are called by RPC Handler.
 // RPC Handler is locked by raftNode.lock.
 
+// r.log is writing ahead log. The position "0" is invalid.
+// r.log[0] = *raftpb.LogEntry{Index: lastIncludeIndex, Term: lastIncludeTerm}
+
 func (r *raftNode) lastLogIndex() uint64 {
-	if len(r.log) == 0 && r.snapshot == nil {
-		// this case is when the node is just started and no log entry is added
-		return 0
-	}
-	if len(r.log) == 0 {
-		// this case is when the node is just compacted and no log entry is added
-		return r.snapshot.LastIncludedIndex
-	}
-	return r.log[len(r.log)-1].Index
+	n := len(r.log)
+	return r.log[n-1].Index
 }
 
 func (r *raftNode) lastLogTerm() uint64 {
-	if len(r.log) == 0 && r.snapshot == nil {
-		// this case is when the node is just started and no log entry is added
-		return 0
-	}
-	if len(r.log) == 0 {
-		// this case is when the node is just compacted and no log entry is added
-		return r.snapshot.LastIncludedTerm
-	}
-	return r.log[len(r.log)-1].Term
+	n := len(r.log)
+	return r.log[n-1].Term
 }
 
-func (r *raftNode) logOffset(index uint64) (uint64, error) {
-	if index <= r.snapshot.LastIncludedIndex {
-		return 0, ErrInvalidIndex
+func (r *raftNode) logAtIndex(index uint64) (*raftpb.LogEntry, error) {
+	if index == 0 {
+		r.logger.Error("logAt index is at a invalid index '0'")
+		return nil, ErrInvalidIndex
 	}
 
-	if r.snapshot != nil {
-		// 5 -> LastIncludedIndex
-		// 10 -> index
-		//      snapshot     <|>           r.log
-		// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
-		//                    | [0, 1, 2, 3,  4,  5,  6, ...]
-		//                 A
-		//         LastIncludedIndex
-		// index = index - r.snapshot.LastIncludedIndex - 1
-		index = index - r.snapshot.LastIncludedIndex - 1
-	}
-	return index, nil
-}
-
-// 获取指定索引的日志条目的任期
-func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
-	if r.snapshot != nil && index <= r.snapshot.LastIncludedIndex {
-		if index == r.snapshot.LastIncludedIndex {
-			return r.snapshot.LastIncludedTerm, nil
+	dummy := r.log[0]
+	n := len(r.log)
+	if dummy.Term == 0 {
+		// not compacted yet
+		if index >= uint64(n) {
+			r.logger.Error("logAt index is out of range", "index", index, "len", n)
+			return nil, ErrLogOutOfRange
 		}
-		return 0, ErrLogAlreadySnapshot
-	}
-	if index > r.lastLogIndex() {
-		return 0, ErrLogOutOfRange
+		return r.log[index], nil
 	}
 
-	i, err := r.logOffset(index)
+	// compacted
+	if index <= dummy.Index {
+		r.logger.Error("logAt index is snapshot", "index", index, "lastIncludedIndex", dummy.Index)
+		return nil, ErrLogAlreadySnapshot
+	}
+	// 5 -> dummy.Index
+	// 10 -> index
+	//      snapshot     <|> r.log
+	// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
+	//                [0,    1, 2, 3, 4, 5,  6,  7, ...]
+	//                 A
+	//         LastIncludedIndex
+	// index = index - dummy.Index
+
+	index = index - dummy.Index
+	if index >= uint64(n) {
+		r.logger.Error("logAt index is out of range", "index", index, "len", n)
+		return nil, ErrLogOutOfRange
+	}
+	return r.log[index], nil
+}
+
+// get the term of the log at the given index
+func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
+	entry, err := r.logAtIndex(index)
 	if err != nil {
 		return 0, err
 	}
-	return r.log[i].Term, nil
+	return entry.Term, nil
 }
 
 func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
-	if len(r.log) == 0 {
-		if r.snapshot != nil && term == r.snapshot.LastIncludedTerm {
-			return r.snapshot.LastIncludedIndex, nil
-		}
-		return 0, ErrLogOutOfRange
+	if term == 0 {
+		r.logger.Error("lastIndexOf term is at a invalid term '0'")
+		return 0, ErrInvalidTerm
 	}
 
-	for i := len(r.log) - 1; i >= 0; i-- {
-		if r.log[i].Term == term {
-			return r.log[i].Index, nil
+	n := len(r.log)
+
+	if r.log[n-1].Term < term {
+		// given term = 6
+		// index:  5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+		// term:   1, 1, 2, 2, 2, 3,  3,  3,  4,  4
+		//                                        Δ
+		//                                      target
+		r.logger.Debug("The last log term is less than the given term", "term", term, "lastLogTerm", r.log[n-1].Term)
+		return r.log[n-1].Index, nil
+	}
+
+	// given term = 2
+	// index:  5, 6, 7, 8, 9, 10, 11, 12, 13, 14
+	// term:   1, 1, 2, 2, 2, 3,  3,  3,  4,  4
+	//                     Δ          <- - - idx
+	//                   target
+	for idx := n - 1; idx > 0; idx-- {
+		if r.log[idx].Term == term {
+			return r.log[idx].Index, nil
 		}
 	}
-	return 0, ErrLogOutOfRange
+
+	// given term = 2
+	// index:  ...,         5, | 6, 7, 8, 9, 10, 11, 12, 13, 14
+	// term:    2, ...,     3, | 4, 5, 5, 5, 5,  5,  6,  6,  6
+	//          Δ           Δ                        <- - - idx
+	//        target      dummy
+	r.logger.Debug("The given term is invalid", "term", term)
+	return 0, ErrInvalidTerm
 }
 
-// 压缩日志，保留索引大于给定索引的日志条目
+// compact log and generate snapshot
 func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
-	// 当前已经交由状态机执行的日志的索引和对应的
 	index := r.lastApplied
-	term, _ := r.getLogTerm(index)
+	if index == 0 {
+		// no snapshot
+		return &raftpb.Snapshot{
+			LastIncludedIndex: 0,
+			LastIncludedTerm:  0,
+			Data:              nil,
+		}, nil
+	}
+
+	// no err expected
+	term, err := r.getLogTerm(index)
+	if err != nil {
+		r.logger.Error("failed to get log term", "err", err)
+		// panic("no error expected, please check the code!!!")
+		return nil, err
+	}
 
 	snapshot := &raftpb.Snapshot{
 		LastIncludedIndex: index,
 		LastIncludedTerm:  term,
-		Data:              nil,
-	}
-	// 获取当前状态机的状态
-	snapshotData := r.stateMachine.TakeSnapshot()
-	snapshot.Data = snapshotData
-	// 更新节点的快照
-	r.snapshot = snapshot
-	err := r.persister.SaveSnapshot(snapshot)
-	if err != nil {
-		panic(err)
 	}
 
-	i, err := r.logOffset(index)
+	// take a snapshot of the state machine
+	// no err expected, please check the code!!!
+	snapshotData, err := r.stateMachine.TakeSnapshot()
 	if err != nil {
+		r.logger.Error("failed to take snapshot", "err", err)
+		//panic("no error expected, please check the code!!!")
 		return nil, err
 	}
+	snapshot.Data = snapshotData
+	// update the snapshot
+	r.snapshot = snapshot
+	// persist the snapshot
+	err = r.persister.SaveSnapshot(snapshot)
+	if err != nil {
+		r.logger.Error("failed to save snapshot", "err", err)
+	}
+
+	// no err expected, please check the code!!!
+	entry, err := r.logAtIndex(index)
+	if err != nil {
+		r.logger.Error("failed to get log at index", "err", err)
+		//panic("no error expected, please check the code!!!")
+		return nil, err
+	}
+
+	newLog := make([]*raftpb.LogEntry, 1)
+	for _, ent := range r.log {
+		if ent.Index <= entry.Index {
+			continue
+		}
+		newLog = append(newLog, ent)
+	}
+
+	// set the dummy log entry
+	newLog[0] = &raftpb.LogEntry{
+		Index: entry.Index,
+		Term:  entry.Term,
+	}
+
 	// update the log
-	r.log = append(make([]*raftpb.LogEntry, 0), r.log[i+1:]...)
+	r.log = newLog
 	return snapshot, nil
 }
 
-// 截断日志，保留索引小于给定索引的日志条目
+// truncate log to the given index, include the given index
 func (r *raftNode) truncateLog(index uint64) error {
-	if r.snapshot != nil && index < r.snapshot.LastIncludedIndex {
-		return ErrLogAlreadySnapshot
-	}
-	if index > r.lastLogIndex() {
-		return ErrLogOutOfRange
-	}
-	if index == r.lastLogIndex() {
-		// nothing to do
-		return nil
-	}
 
-	i, err := r.logOffset(index)
+	entry, err := r.logAtIndex(index)
 	if err != nil {
 		return err
 	}
-	r.log = append(make([]*raftpb.LogEntry, 0), r.log[:i+1]...)
+
+	newLog := make([]*raftpb.LogEntry, 1)
+	newLog[0] = r.log[0]
+
+	for _, ent := range r.log {
+		if ent.Index > entry.Index {
+			break
+		}
+		newLog = append(newLog, ent)
+	}
+
+	r.log = newLog
 	return nil
 }
 
-// 检查日志条目是否匹配
+// check if the log at the given index is match
 func (r *raftNode) checkLogMatch(prevLogTerm, prevLogIndex uint64) (bool, *raftpb.LogEntry, error) {
 	term, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
-		// use snapshot to recover
-		return false, nil, err
+		// TODO: think about the ErrInvalidIndex? should it return false?
+		if !errors.Is(err, ErrInvalidIndex) {
+			// use snapshot to recover
+			return false, nil, err
+		}
 	}
 
 	if term != prevLogTerm {
