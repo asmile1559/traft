@@ -2,8 +2,9 @@ package traft
 
 import (
 	"context"
-	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 	"sync"
+
+	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
 func (r *raftNode) heartbeat(ctx context.Context) {
@@ -65,10 +66,9 @@ func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {
 
 		client := raftpb.NewTRaftServiceClient(peer.cc)
 		resp, err := client.AppendEntries(ctx, req)
-		r.appendEntriesRespC <- &Response{
+		r.handleResultC <- &Result{
 			PeerID: peer.Id(),
 			Resp:   resp,
-			Err:    err,
 		}
 	}
 }

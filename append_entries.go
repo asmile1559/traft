@@ -7,14 +7,7 @@ import (
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
-type Response struct {
-	PeerID string
-	Resp   *raftpb.AppendEntriesResp
-	Err    error
-}
-
 // AppendEntries is the raft heartbeat and walogs replication RPC.
-// TODO: check it is thread safe!
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,7 +37,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	r.electionTimer.Reset(RandomElectionTimeout())
 
 	resp.Term = r.currentTerm
-	ok, entry, err := r.checkLogMatch(req.PrevLogTerm, req.PrevLogIndex)
+	ok, entry, err := r.checkLogMatch(req.PrevLogIndex, req.PrevLogTerm)
 
 	if !ok {
 		if errors.Is(err, ErrLogAlreadySnapshot) {
@@ -78,7 +71,6 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	}
 
 	if len(req.Entries) > 0 {
-		// no entries to append, return success
 		r.walogs = append(r.walogs, req.Entries...)
 	}
 
@@ -95,7 +87,10 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 		r.commitIndex = min(req.LeaderCommit, last)
 		r.applyC <- struct{}{}
 	}
-	_ = r.persister.SaveLogEntries(r.walogs)
+
+	if len(req.Entries) > 0 {
+		_ = r.persister.SaveLogEntries(r.walogs)
+	}
 	return resp, nil
 }
 
@@ -103,35 +98,38 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 // `lastLogIndex + 1`, and the matchIndex[] is set to 0. Then, the leader sends heartbeat to all peers. If the peer who
 // receives the heartbeat, it will check the walogs, and then feed back the `AppendEntriesResp` to the leader.
 
-func (r *raftNode) appendEntries(ctx context.Context) {
+// when a follower transitions to a leader, it calls this function
+func (r *raftNode) listenAppendEntriesRequest(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// TODO: clean resources
 			return
-		case p := <-r.appendEntriesC:
-			// send append entries to peer
-			r.logger.Debug("send append entries to peer", "peerId", p)
-			peer := r.peers[p]
-			if peer == nil {
-				// TODO: use other method to handle this error
-				panic(ErrPeerIsNil.Error())
+		case peerId := <-r.appendEntriesC:
+			r.logger.Debug("send append entries to peer", "peer id", peerId)
+			peer, ok := r.peers[peerId]
+			if !ok {
+				r.logger.Error("no such peer in the cluster", "peer id", peerId)
+				continue
 			}
-			// send append entries to peer
-			r.appendEntriesPeer(ctx, peer)
+			go r.sendAppendEntries(ctx, peer)
 		}
 	}
 }
 
-func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
+func (r *raftNode) sendAppendEntries(ctx context.Context, peer *Peer) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	r.logger.Debug("enter append entries to peer", "peerId", peer.Id())
 	defer r.logger.Debug("exit append entries to peer", "peerId", peer.Id())
 	prevLogIndex := peer.NextIndex() - 1
-	r.mu.RLock()
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
 		r.installSnapshotC <- peer.Id()
-		r.mu.RUnlock()
 		return
 	}
 	req := &raftpb.AppendEntriesReq{
@@ -142,72 +140,9 @@ func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
 		LeaderCommit: r.commitIndex,
 		Entries:      r.walogs[prevLogIndex+1:],
 	}
-	r.mu.RUnlock()
 	resp, err := peer.SendAppendEntriesRequest(ctx, req)
-	r.appendEntriesRespC <- &Response{
+	r.handleResultC <- &Result{
 		PeerID: peer.Id(),
 		Resp:   resp,
-		Err:    err,
-	}
-}
-
-// no matter heartbeat or appendEntries request, the response will be processed by that function.
-// cause there maybe
-func (r *raftNode) processResponse(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			// TODO: clean resources
-			return
-		case rPack := <-r.appendEntriesRespC:
-			r.logger.Debug("receive append entries response from peer", "peerId", rPack.PeerID)
-			id := rPack.PeerID
-			err := rPack.Err
-			resp := rPack.Resp
-			peer := r.peers[id]
-			if resp.Term > r.currentTerm {
-				// update current term and transition to follower
-				r.transitionToFollower(resp.Term, VotedForNone)
-				return
-			}
-
-			if resp.Success {
-				r.logger.Debug("success append entries response from peer", "peerId", id)
-				// update nextIndex and matchIndex
-				peer.UpdateNextIndex(resp.MatchIndex + 1)
-				peer.UpdateMatchIndex(resp.MatchIndex)
-				return
-			}
-
-			if resp.ConflictTerm == 0 && resp.ConflictIndex == 0 {
-				r.logger.Debug("reject, use install snapshot", "peerId", id)
-				// use snapshot to recover
-				r.installSnapshotC <- id
-				return
-			}
-
-			if resp.ConflictTerm == 0 {
-				r.logger.Debug("reject, reset nextIndex", "peerId", id)
-				peer.UpdateNextIndex(resp.ConflictIndex)
-				// call appendEntries again
-				r.appendEntriesC <- id
-				return
-			}
-
-			_, err = r.getLogTerm(resp.ConflictIndex)
-			if err != nil {
-				peer.UpdateNextIndex(resp.ConflictIndex)
-			} else {
-				ct := resp.ConflictTerm
-
-				li, err := r.lastIndexOf(ct)
-				if err != nil {
-					r.installSnapshotC <- peer.Id()
-					return
-				}
-				peer.UpdateNextIndex(li + 1)
-			}
-			r.appendEntriesC <- id
-		}
 	}
 }

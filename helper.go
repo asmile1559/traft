@@ -10,7 +10,15 @@ import (
 )
 
 const (
-	LoggerLevel = slog.LevelDebug
+	LoggerLevel       = slog.LevelDebug
+	HeartbeatInterval = 100 * time.Millisecond // 心跳间隔
+
+	// MinElectionTimeout 最小选举超时范围, 单位为毫秒
+	MinElectionTimeout = 150
+	// MaxElectionTimeout 最大选举超时范围, 单位为毫秒
+	MaxElectionTimeout = 300
+
+	Mode = "DEBUG"
 )
 
 func FormatLogger(module string) *slog.Logger {
@@ -25,7 +33,18 @@ func FormatLogger(module string) *slog.Logger {
 
 func RandomElectionTimeout() time.Duration {
 	// 随机选举超时时间，范围在 [150ms, 300ms]
+	if Mode == "DEBUG" {
+		return time.Hour
+	}
 	return time.Duration(MinElectionTimeout+rand.Intn(MaxElectionTimeout-MinElectionTimeout)) * time.Millisecond
+}
+
+func GetHeartbeatDuration() time.Duration {
+	// 心跳间隔时间，范围在 [50ms, 100ms]
+	if Mode == "DEBUG" {
+		return time.Hour
+	}
+	return HeartbeatInterval
 }
 
 func GetLatestFile(dir string, t PFileType) (string, error) {

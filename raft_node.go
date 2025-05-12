@@ -2,24 +2,18 @@ package traft
 
 import (
 	"context"
-	raftpb "github.com/asmile1559/traft/internal/apis/raft"
-	"google.golang.org/grpc"
 	"log/slog"
 	"net"
 	"os"
 	"sync"
 	"time"
+
+	raftpb "github.com/asmile1559/traft/internal/apis/raft"
+	"google.golang.org/grpc"
 )
 
 const (
 	VotedForNone = ""
-
-	HeartbeatInterval = 100 * time.Millisecond // 心跳间隔
-
-	// MinElectionTimeout 最小选举超时范围, 单位为毫秒
-	MinElectionTimeout = 150
-	// MaxElectionTimeout 最大选举超时范围, 单位为毫秒
-	MaxElectionTimeout = 300
 )
 
 type RaftNode interface {
@@ -30,7 +24,8 @@ type RaftNode interface {
 
 	// leader
 	heartbeat(ctx context.Context)
-	appendEntries(ctx context.Context)
+	listenAppendEntriesRequest(ctx context.Context)
+	listenHandleResult(ctx context.Context)
 
 	// candidate
 	election(ctx context.Context)
@@ -79,10 +74,10 @@ type raftNode struct {
 	// when heartbeatTicker expires, send heartbeat to all followers, it used by leader
 	heartbeatTicker *time.Ticker
 
-	applyC             chan struct{}
-	appendEntriesC     chan string // chan of peer id, used to notify append entries
-	installSnapshotC   chan string // chan of peer id, used to notify install snapshot
-	appendEntriesRespC chan *Response
+	applyC           chan struct{}
+	appendEntriesC   chan string // chan of peer id, used to notify append entries
+	installSnapshotC chan string // chan of peer id, used to notify install snapshot
+	handleResultC    chan *Result
 	// only provide read operation, each peer in raft node has its own mutex.
 	peers map[string]*Peer
 
@@ -133,25 +128,25 @@ func New(config *Config) RaftNode {
 	)
 
 	return &raftNode{
-		id:                 config.Id,
-		addr:               config.Addr,
-		role:               Follower,
-		currentTerm:        0,
-		votedFor:           VotedForNone,
-		walogs:             make([]*raftpb.LogEntry, 0),
-		commitIndex:        0,
-		lastApplied:        0,
-		snapshot:           nil,
-		stateMachine:       config.StateMachine,
-		persister:          config.Persister,
-		electionTimer:      time.NewTimer(RandomElectionTimeout()),
-		heartbeatTicker:    time.NewTicker(HeartbeatInterval),
-		applyC:             make(chan struct{}, 1),
-		appendEntriesC:     make(chan string, 2*peerCount),
-		appendEntriesRespC: make(chan *Response, 2*peerCount),
-		installSnapshotC:   make(chan string, 2*peerCount),
-		peers:              peers,
-		logger:             logger,
+		id:               config.Id,
+		addr:             config.Addr,
+		role:             Follower,
+		currentTerm:      0,
+		votedFor:         VotedForNone,
+		walogs:           make([]*raftpb.LogEntry, 0),
+		commitIndex:      0,
+		lastApplied:      0,
+		snapshot:         nil,
+		stateMachine:     config.StateMachine,
+		persister:        config.Persister,
+		electionTimer:    time.NewTimer(RandomElectionTimeout()),
+		heartbeatTicker:  time.NewTicker(HeartbeatInterval),
+		applyC:           make(chan struct{}, 1),
+		appendEntriesC:   make(chan string, 2*peerCount),
+		handleResultC:    make(chan *Result, 2*peerCount),
+		installSnapshotC: make(chan string, 2*peerCount),
+		peers:            peers,
+		logger:           logger,
 	}
 }
 
@@ -166,9 +161,9 @@ func (r *raftNode) Start() error {
 	// start heartbeat
 	go r.heartbeat(ctx)
 	// start append entries
-	go r.appendEntries(ctx)
+	// go r.appendEntries(ctx)
 	// start process response
-	go r.processResponse(ctx)
+	// go r.processResponse(ctx)
 	// start install snapshot
 	go r.installSnapshot(ctx)
 	// start apply walogs

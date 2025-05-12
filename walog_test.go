@@ -684,5 +684,80 @@ func TestFirstDiffTermEntry(t *testing.T) {
 			t.Errorf("expect get {index: %v, term: %v}, but got {index: %v, term: %v}", tc.index, tc.term, ent.Index, ent.Term)
 		}
 	}
+}
 
+func TestCutoffLogsByIndex(t *testing.T) {
+	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	})
+
+	logger := slog.New(h)
+	rn := &raftNode{
+		walogs: []*raftpb.LogEntry{
+			{Index: 0, Term: 0},
+			{Index: 1, Term: 1},
+			{Index: 2, Term: 1},
+			{Index: 3, Term: 1},
+			{Index: 4, Term: 1},
+			{Index: 5, Term: 1},
+			{Index: 6, Term: 1},
+			{Index: 7, Term: 2},
+			{Index: 8, Term: 2},
+			{Index: 9, Term: 2},
+			{Index: 10, Term: 3},
+			{Index: 11, Term: 3},
+			{Index: 12, Term: 4},
+			{Index: 13, Term: 4},
+			{Index: 14, Term: 4},
+			{Index: 15, Term: 5},
+			{Index: 16, Term: 5},
+		},
+		logger: logger,
+	}
+
+	rn.cutoffLogsByIndex(0)
+	if len(rn.walogs) != 17 {
+		t.Errorf("expected walogs length to be 14, got %d", len(rn.walogs))
+	}
+
+	rn.cutoffLogsByIndex(3)
+	if len(rn.walogs) != 14 {
+		t.Errorf("expected walogs length to be 14, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 3 || rn.walogs[0].Term != 1 {
+		t.Errorf("expected walogs[0] to be {Index: 3, Term: 1}, got %+v", rn.walogs[0])
+	}
+
+	rn.cutoffLogsByIndex(12)
+	if len(rn.walogs) != 5 {
+		t.Errorf("expected walogs length to be 5, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 12 || rn.walogs[0].Term != 4 {
+		t.Errorf("expected walogs[0] to be {Index: 12, Term: 4}, got %+v", rn.walogs[0])
+	}
+
+	rn.cutoffLogsByIndex(5)
+	if len(rn.walogs) != 5 {
+		t.Errorf("expected walogs length to be 5, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 12 || rn.walogs[0].Term != 4 {
+		t.Errorf("expected walogs[0] to be {Index: 12, Term: 4}, got %+v", rn.walogs[0])
+	}
+
+	rn.cutoffLogsByIndex(17)
+	if len(rn.walogs) != 1 {
+		t.Errorf("expected walogs length to be 1, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 16 || rn.walogs[0].Term != 5 {
+		t.Errorf("expected walogs[0] to be {Index: 17, Term: 0}, got %+v", rn.walogs[0])
+	}
+
+	rn.cutoffLogsByIndex(19)
+	if len(rn.walogs) != 1 {
+		t.Errorf("expected walogs length to be 1, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 16 || rn.walogs[0].Term != 5 {
+		t.Errorf("expected walogs[0] to be {Index: 17, Term: 0}, got %+v", rn.walogs[0])
+	}
 }

@@ -287,3 +287,29 @@ func (r *raftNode) firstDiffTermEntry(index, term uint64) (*raftpb.LogEntry, err
 		Term:  term - 1,
 	}, nil
 }
+
+func (r *raftNode) cutoffLogsByIndex(index uint64) {
+	r.logger.Debug("cutoffLogByIndex entry", "index", index)
+	defer r.logger.Debug("cutoffLogByIndex exit", "index", index)
+	if index == 0 {
+		return
+	}
+
+	dummyIndex := r.walogs[0].Index
+	if index <= dummyIndex {
+		r.logger.Debug("cutoffLogByIndex index is less than dummyIndex", "index", index, "dummyIndex", dummyIndex)
+		return
+	}
+	n := len(r.walogs)
+	if dummyIndex+uint64(n)-1 <= index {
+		r.walogs = []*raftpb.LogEntry{
+			r.walogs[n-1],
+		}
+		return
+	}
+
+	lastIndex := r.lastLogIndex()
+	between := lastIndex - index
+	cutIndex := n - 1 - int(between)
+	r.walogs = append(make([]*raftpb.LogEntry, 0, between+1), r.walogs[cutIndex:]...)
+}

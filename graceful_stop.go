@@ -1,11 +1,12 @@
 package traft
 
 import (
-	"google.golang.org/grpc"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"google.golang.org/grpc"
 )
 
 func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener) {
@@ -28,7 +29,7 @@ func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener) {
 	// 关闭 appendEntriesC 通道
 	close(r.appendEntriesC)
 	// 关闭 appendEntriesRespC 通道
-	close(r.appendEntriesRespC)
+	// close(r.appendEntriesRespC)
 	// 关闭 installSnapshotC 通道
 	close(r.installSnapshotC)
 	// 关闭 applyC 通道
