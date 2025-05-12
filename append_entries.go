@@ -3,6 +3,7 @@ package traft
 import (
 	"context"
 	"errors"
+
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
@@ -12,16 +13,20 @@ type Response struct {
 	Err    error
 }
 
-// AppendEntries is the raft heartbeat and log replication RPC.
+// AppendEntries is the raft heartbeat and walogs replication RPC.
 // TODO: check it is thread safe!
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	r.logger.Debug("received AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
+	defer r.logger.Debug("exit AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
+
 	resp := &raftpb.AppendEntriesResp{
-		Term:    r.currentTerm,
-		Success: false,
+		Term:          r.currentTerm,
+		Success:       false,
+		MatchIndex:    0,
+		ConflictTerm:  0,
+		ConflictIndex: 0,
 	}
 
 	// reject when an old term request received
@@ -43,66 +48,60 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 
 	if !ok {
 		if errors.Is(err, ErrLogAlreadySnapshot) {
-			r.logger.Debug("reject AppendEntries request cause log already snapshot")
-			resp.ConflictTerm = 0
-			resp.ConflictIndex = 0
+			r.logger.Debug("reject AppendEntries request cause walogs already snapshot")
 		} else if errors.Is(err, ErrLogOutOfRange) {
-			r.logger.Debug("reject AppendEntries request cause log out of range")
-			resp.ConflictTerm = 0
+			r.logger.Debug("reject AppendEntries request cause walogs out of range")
 			resp.ConflictIndex = r.lastLogIndex() + 1
+		} else if errors.Is(err, ErrInvalidIndex) {
+			r.logger.Debug("reject AppendEntries request cause walogs invalid index")
 		} else {
-			r.logger.Debug("reject AppendEntries request cause log not match")
+			r.logger.Debug("reject AppendEntries request cause walogs not match")
 			ct := entry.Term
 			ci := entry.Index
-			// find the first log entry whose term is not conflictTerm
-			if r.snapshot != nil {
-				for ; ci > r.snapshot.LastIncludedIndex; ci-- {
-					idx, _ := r.logOffset(ci)
-					if r.log[idx].Term != ct {
-						break
-					}
-				}
-				resp.ConflictTerm = ct
-				resp.ConflictIndex = ci + 1
+			// find the first walogs entry whose term is not conflictTerm
+			ent, err := r.firstDiffTermEntry(ci, ct)
+			if err != nil {
+				r.logger.Debug("reject AppendEntries request cause walogs not match", "err", err)
 			} else {
-				for ; ci < entry.Index; ci-- {
-					if r.log[ci].Term != ct {
-						break
-					}
-				}
+				r.logger.Debug("reject AppendEntries request cause walogs not match", "conflictTerm", ct, "conflictIndex", entry.Index+1)
+				resp.ConflictIndex = ent.Index + 1
 				resp.ConflictTerm = ct
-				resp.ConflictIndex = ci + 1
 			}
 		}
 		return resp, nil
 	}
 
 	r.logger.Debug("success AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
-	if errors.Is(err, ErrNeedTruncate) && len(req.Entries) > 0 {
-		// log match, but need to truncate
+	if errors.Is(err, ErrNeedTruncate) {
+		// walogs match, but need to truncate
 		_ = r.truncateLog(req.PrevLogIndex)
 	}
 
 	if len(req.Entries) > 0 {
 		// no entries to append, return success
-		r.log = append(r.log, req.Entries...)
+		r.walogs = append(r.walogs, req.Entries...)
 	}
 
 	resp.Success = true
 	resp.MatchIndex = req.PrevLogIndex + uint64(len(req.Entries))
+	if resp.MatchIndex > r.lastLogIndex() {
+		// should not happen
+		r.logger.Error("the match index is greater than the last log index", "matchIndex", resp.MatchIndex, "lastLogIndex", r.lastLogIndex())
+	}
+
 	// update commit index
 	if req.LeaderCommit > r.commitIndex {
 		last := r.lastLogIndex()
 		r.commitIndex = min(req.LeaderCommit, last)
 		r.applyC <- struct{}{}
 	}
-	r.persister.SaveLogEntries(r.log)
+	_ = r.persister.SaveLogEntries(r.walogs)
 	return resp, nil
 }
 
 // When a follower transitions to a leader, it resets the nextIndex[] and matchIndex[]. The nextIndex[] is set to the
 // `lastLogIndex + 1`, and the matchIndex[] is set to 0. Then, the leader sends heartbeat to all peers. If the peer who
-// receives the heartbeat, it will check the log, and then feed back the `AppendEntriesResp` to the leader.
+// receives the heartbeat, it will check the walogs, and then feed back the `AppendEntriesResp` to the leader.
 
 func (r *raftNode) appendEntries(ctx context.Context) {
 	for {
@@ -141,7 +140,7 @@ func (r *raftNode) appendEntriesPeer(ctx context.Context, peer *Peer) {
 		PrevLogIndex: prevLogIndex,
 		PrevLogTerm:  prevLogTerm,
 		LeaderCommit: r.commitIndex,
-		Entries:      r.log[prevLogIndex+1:],
+		Entries:      r.walogs[prevLogIndex+1:],
 	}
 	r.mu.RUnlock()
 	resp, err := peer.SendAppendEntriesRequest(ctx, req)

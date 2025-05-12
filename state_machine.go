@@ -3,7 +3,6 @@ package traft
 import (
 	"encoding/json"
 	"log/slog"
-	"os"
 	"sync"
 )
 
@@ -22,34 +21,23 @@ type StateMachine interface {
 
 type KVStateMachine struct {
 	// kv store
-	nodeId string
 	store  map[string]string
 	mu     sync.RWMutex
 	logger *slog.Logger
 }
 
-func NewKVStateMachine(nodeId string) *KVStateMachine {
-
-	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
-		Level:     LoggerLevel,
-	})
-
-	logger := slog.New(h).With(
-		"node_id", nodeId,
-		"module", "state_machine",
-	)
-
+func NewKVStateMachine() *KVStateMachine {
 	return &KVStateMachine{
-		nodeId: nodeId,
 		store:  make(map[string]string),
-		logger: logger,
+		logger: FormatLogger("state_machine"),
 	}
 }
 
 func (k *KVStateMachine) ApplyLog(logData []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	k.logger.Debug("ApplyLog entry", "logData", string(logData))
+	defer k.logger.Debug("ApplyLog exit", "logData", string(logData))
 
 	kv := struct {
 		Operation string `json:"operation"`
@@ -77,6 +65,8 @@ func (k *KVStateMachine) ApplyLog(logData []byte) error {
 func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	k.logger.Debug("ApplySnapshot entry", "snapshotData", string(snapshotData))
+	defer k.logger.Debug("ApplySnapshot exit", "snapshotData", string(snapshotData))
 
 	if err := json.Unmarshal(snapshotData, &k.store); err != nil {
 		k.logger.Error("ApplySnapshot failed", "error", err.Error())
@@ -88,6 +78,8 @@ func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 func (k *KVStateMachine) TakeSnapshot() ([]byte, error) {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
+	k.logger.Debug("TakeSnapshot entry")
+	defer k.logger.Debug("TakeSnapshot exit")
 
 	snapshotData, err := json.Marshal(k.store)
 	if err != nil {

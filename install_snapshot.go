@@ -40,17 +40,17 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	r.snapshot = req.Snapshot
 
 	if req.Snapshot.LastIncludedIndex < r.lastLogIndex() {
-		// truncate the log
+		// truncate the walogs
 		_ = r.truncateLog(req.Snapshot.LastIncludedIndex)
 	} else {
-		r.log = make([]*raftpb.LogEntry, 0)
+		r.walogs = make([]*raftpb.LogEntry, 0)
 	}
 
 	r.commitIndex = req.Snapshot.LastIncludedIndex
 	r.lastApplied = req.Snapshot.LastIncludedIndex
 
 	_ = r.persister.SaveSnapshot(r.snapshot)
-	_ = r.persister.SaveLogEntries(r.log)
+	_ = r.persister.SaveLogEntries(r.walogs)
 	resp.Success = true
 	return resp, nil
 }

@@ -3,6 +3,7 @@ package traft
 import (
 	"encoding/gob"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,7 +13,7 @@ type PFileType string
 
 const (
 	PMetadataFile PFileType = "metadata"
-	PLogFile      PFileType = "log"
+	PLogFile      PFileType = "walogs"
 	PSnapshotFile PFileType = "snapshot"
 )
 
@@ -32,6 +33,8 @@ type FilePersister struct {
 	metadataFile string
 	logFile      string
 	snapshotFile string
+
+	logger *slog.Logger
 }
 
 func NewFilePersister(dir string) *FilePersister {
@@ -40,10 +43,15 @@ func NewFilePersister(dir string) *FilePersister {
 		//TODO: handle error
 		panic(err)
 	}
-	return &FilePersister{dir: dir}
+	return &FilePersister{
+		dir:    dir,
+		logger: FormatLogger("persister"),
+	}
 }
 
 func (p *FilePersister) checkBeforeLoad(t PFileType) (string, error) {
+	p.logger.Debug("checkBeforeLoad entry", "type", t)
+	defer p.logger.Debug("checkBeforeLoad exit", "type", t)
 	switch t {
 	case PMetadataFile:
 		if p.metadataFile == "" && p.dir == "" {
@@ -74,6 +82,8 @@ func (p *FilePersister) checkBeforeLoad(t PFileType) (string, error) {
 }
 
 func (p *FilePersister) SaveMetadata(term uint64, votedFor string) error {
+	p.logger.Debug("SaveMetadata entry", "type", term, "votedFor", votedFor)
+	defer p.logger.Debug("SaveMetadata exit", "type", term, "votedFor", votedFor)
 	fName := time.Now().Format("060102150405") + ".metadata"
 	f, err := os.Create(filepath.Join(p.dir, fName))
 	if err != nil {
@@ -98,6 +108,8 @@ func (p *FilePersister) SaveMetadata(term uint64, votedFor string) error {
 }
 
 func (p *FilePersister) LoadMetadata() (uint64, string, error) {
+	p.logger.Debug("LoadMetadata entry")
+	defer p.logger.Debug("LoadMetadata exit")
 	_, err := p.checkBeforeLoad(PMetadataFile)
 	if err != nil {
 		return 0, "", err
@@ -120,7 +132,9 @@ func (p *FilePersister) LoadMetadata() (uint64, string, error) {
 }
 
 func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry) error {
-	fName := time.Now().Format("060102150405") + ".log"
+	p.logger.Debug("SaveLogEntries entry")
+	defer p.logger.Debug("SaveLogEntries exit")
+	fName := time.Now().Format("060102150405") + ".walogs"
 	f, err := os.Create(filepath.Join(p.dir, fName))
 	if err != nil {
 		return err
@@ -141,6 +155,8 @@ func (p *FilePersister) SaveLogEntries(entries []*raftpb.LogEntry) error {
 }
 
 func (p *FilePersister) LoadLogEntries() ([]*raftpb.LogEntry, error) {
+	p.logger.Debug("LoadLogEntries entry")
+	defer p.logger.Debug("LoadLogEntries exit")
 	_, err := p.checkBeforeLoad(PLogFile)
 	if err != nil {
 		return nil, err
@@ -160,6 +176,8 @@ func (p *FilePersister) LoadLogEntries() ([]*raftpb.LogEntry, error) {
 }
 
 func (p *FilePersister) SaveSnapshot(snapshot *raftpb.Snapshot) error {
+	p.logger.Debug("SaveSnapshot entry")
+	defer p.logger.Debug("SaveSnapshot exit")
 	fName := time.Now().Format("060102150405") + ".snapshot"
 	f, err := os.Create(filepath.Join(p.dir, fName))
 	if err != nil {
@@ -180,6 +198,8 @@ func (p *FilePersister) SaveSnapshot(snapshot *raftpb.Snapshot) error {
 }
 
 func (p *FilePersister) LoadSnapshot() (*raftpb.Snapshot, error) {
+	p.logger.Debug("LoadSnapshot entry")
+	defer p.logger.Debug("LoadSnapshot exit")
 	_, err := p.checkBeforeLoad(PSnapshotFile)
 	if err != nil {
 		return nil, err

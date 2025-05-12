@@ -13,7 +13,6 @@ const (
 )
 
 func init() {
-	SetLogger()
 	if _, err := os.Stat(TestDir); os.IsNotExist(err) {
 		if err := os.Mkdir(TestDir, 0755); err != nil {
 			slog.Error(err.Error())

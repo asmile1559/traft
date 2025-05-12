@@ -2,40 +2,50 @@ package traft
 
 import (
 	"errors"
+
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
 // In this file, all functions designed lock-free because they are called by RPC Handler.
 // RPC Handler is locked by raftNode.lock.
 
-// r.log is writing ahead log. The position "0" is invalid.
-// r.log[0] = *raftpb.LogEntry{Index: lastIncludeIndex, Term: lastIncludeTerm}
+// r.walogs is writing ahead walogs. The position "0" is invalid.
+// r.walogs[0] = *raftpb.LogEntry{Index: lastIncludeIndex, Term: lastIncludeTerm}
+
+// walog@v1: use a slice to store walogs, the first element is a dummy walogs entry.
+// TODO: walog@v2: use a cyclic queue to store walogs, auto compact when the walogs is full.
 
 func (r *raftNode) lastLogIndex() uint64 {
-	n := len(r.log)
-	return r.log[n-1].Index
+	r.logger.Debug("lastLogIndex entry")
+	defer r.logger.Debug("lastLogIndex exit")
+	n := len(r.walogs)
+	return r.walogs[n-1].Index
 }
 
 func (r *raftNode) lastLogTerm() uint64 {
-	n := len(r.log)
-	return r.log[n-1].Term
+	r.logger.Debug("lastLogTerm entry")
+	defer r.logger.Debug("lastLogTerm exit")
+	n := len(r.walogs)
+	return r.walogs[n-1].Term
 }
 
 func (r *raftNode) logAtIndex(index uint64) (*raftpb.LogEntry, error) {
+	r.logger.Debug("logAtIndex entry", "index", index)
+	defer r.logger.Debug("logAtIndex exit", "index", index)
 	if index == 0 {
 		r.logger.Error("logAt index is at a invalid index '0'")
 		return nil, ErrInvalidIndex
 	}
 
-	dummy := r.log[0]
-	n := len(r.log)
+	dummy := r.walogs[0]
+	n := len(r.walogs)
 	if dummy.Term == 0 {
 		// not compacted yet
 		if index >= uint64(n) {
-			r.logger.Error("logAt index is out of range", "index", index, "len", n)
+			r.logger.Error("logAt index is out of range", "index", index, "max index", n-1)
 			return nil, ErrLogOutOfRange
 		}
-		return r.log[index], nil
+		return r.walogs[index], nil
 	}
 
 	// compacted
@@ -45,7 +55,7 @@ func (r *raftNode) logAtIndex(index uint64) (*raftpb.LogEntry, error) {
 	}
 	// 5 -> dummy.Index
 	// 10 -> index
-	//      snapshot     <|> r.log
+	//      snapshot     <|> r.walogs
 	// [0, 1, 2, 3, 4, 5] | [6, 7, 8, 9, 10, 11, 12, ...]
 	//                [0,    1, 2, 3, 4, 5,  6,  7, ...]
 	//                 A
@@ -54,14 +64,16 @@ func (r *raftNode) logAtIndex(index uint64) (*raftpb.LogEntry, error) {
 
 	index = index - dummy.Index
 	if index >= uint64(n) {
-		r.logger.Error("logAt index is out of range", "index", index, "len", n)
+		r.logger.Error("logAt index is out of range", "index", index+dummy.Index, "lastIncludedIndex", uint64(n)+dummy.Index-1)
 		return nil, ErrLogOutOfRange
 	}
-	return r.log[index], nil
+	return r.walogs[index], nil
 }
 
-// get the term of the log at the given index
+// get the term of the walogs at the given index
 func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
+	r.logger.Debug("getLogTerm entry", "index", index)
+	defer r.logger.Debug("getLogTerm exit", "index", index)
 	entry, err := r.logAtIndex(index)
 	if err != nil {
 		return 0, err
@@ -70,21 +82,23 @@ func (r *raftNode) getLogTerm(index uint64) (uint64, error) {
 }
 
 func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
+	r.logger.Debug("lastIndexOf entry", "term", term)
+	defer r.logger.Debug("lastIndexOf exit", "term", term)
 	if term == 0 {
 		r.logger.Error("lastIndexOf term is at a invalid term '0'")
 		return 0, ErrInvalidTerm
 	}
 
-	n := len(r.log)
+	n := len(r.walogs)
 
-	if r.log[n-1].Term < term {
+	if r.walogs[n-1].Term < term {
 		// given term = 6
 		// index:  5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 		// term:   1, 1, 2, 2, 2, 3,  3,  3,  4,  4
 		//                                        Δ
 		//                                      target
-		r.logger.Debug("The last log term is less than the given term", "term", term, "lastLogTerm", r.log[n-1].Term)
-		return r.log[n-1].Index, nil
+		r.logger.Warn("The last walogs term is less than the given term", "term", term, "lastLogTerm", r.walogs[n-1].Term)
+		return r.walogs[n-1].Index, ErrTruncatedTerm
 	}
 
 	// given term = 2
@@ -92,11 +106,11 @@ func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
 	// term:   1, 1, 2, 2, 2, 3,  3,  3,  4,  4
 	//                     Δ          <- - - idx
 	//                   target
-	// Start from the last log entry and iterate backward, excluding index 0.
-	// Index 0 is excluded because it is a dummy log entry (see lines 11-12).
+	// Start from the last walogs entry and iterate backward, excluding index 0.
+	// Index 0 is excluded because it is a dummy walogs entry (see lines 11-12).
 	for idx := n - 1; idx > 0; idx-- {
-		if r.log[idx].Term == term {
-			return r.log[idx].Index, nil
+		if r.walogs[idx].Term == term {
+			return r.walogs[idx].Index, nil
 		}
 	}
 
@@ -109,8 +123,10 @@ func (r *raftNode) lastIndexOf(term uint64) (uint64, error) {
 	return 0, ErrInvalidTerm
 }
 
-// compact log and generate snapshot
+// compact walogs and generate snapshot
 func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
+	r.logger.Debug("compactLog entry")
+	defer r.logger.Debug("compactLog exit")
 	index := r.lastApplied
 	if index == 0 {
 		// no snapshot
@@ -124,7 +140,7 @@ func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
 	// no err expected
 	term, err := r.getLogTerm(index)
 	if err != nil {
-		r.logger.Error("failed to get log term", "err", err)
+		r.logger.Error("failed to get walogs term", "err", err)
 		// panic("no error expected, please check the code!!!")
 		return nil, err
 	}
@@ -154,65 +170,75 @@ func (r *raftNode) compactLog() (*raftpb.Snapshot, error) {
 	// no err expected, please check the code!!!
 	entry, err := r.logAtIndex(index)
 	if err != nil {
-		r.logger.Error("failed to get log at index", "err", err)
+		r.logger.Error("failed to get walogs at index", "err", err)
 		//panic("no error expected, please check the code!!!")
 		return nil, err
 	}
 
 	newLog := make([]*raftpb.LogEntry, 1)
-	for _, ent := range r.log {
+	for _, ent := range r.walogs {
 		if ent.Index <= entry.Index {
 			continue
 		}
 		newLog = append(newLog, ent)
 	}
 
-	// set the dummy log entry
+	// set the dummy walogs entry
 	newLog[0] = &raftpb.LogEntry{
 		Index: entry.Index,
 		Term:  entry.Term,
 	}
 
-	// update the log
-	r.log = newLog
+	// update the walogs
+	r.walogs = newLog
 	return snapshot, nil
 }
 
-// truncate log to the given index, include the given index
+// truncate walogs to the given index, include the given index
 func (r *raftNode) truncateLog(index uint64) error {
-
+	r.logger.Debug("truncateLog entry", "index", index)
+	defer r.logger.Debug("truncateLog exit", "index", index)
 	entry, err := r.logAtIndex(index)
 	if err != nil {
 		return err
 	}
 
-	newLog := make([]*raftpb.LogEntry, 1)
-	newLog[0] = r.log[0]
+	newLog := make([]*raftpb.LogEntry, 0)
 
-	for _, ent := range r.log {
+	for _, ent := range r.walogs {
 		if ent.Index > entry.Index {
 			break
 		}
 		newLog = append(newLog, ent)
 	}
 
-	r.log = newLog
+	newLog[0] = r.walogs[0]
+	r.walogs = newLog
 	return nil
 }
 
-// check if the log at the given index is match
-func (r *raftNode) checkLogMatch(prevLogTerm, prevLogIndex uint64) (bool, *raftpb.LogEntry, error) {
+// check if the walogs at the given index is match
+func (r *raftNode) checkLogMatch(prevLogIndex, prevLogTerm uint64) (bool, *raftpb.LogEntry, error) {
+	r.logger.Debug("checkLogMatch entry", "prevLogIndex", prevLogIndex, "prevLogTerm", prevLogTerm)
+	defer r.logger.Debug("checkLogMatch exit", "prevLogIndex", prevLogIndex, "prevLogTerm", prevLogTerm)
 	term, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
-		// TODO: think about the ErrInvalidIndex? should it return false?
-		if !errors.Is(err, ErrInvalidIndex) {
+		// ErrInvalidIndex return true
+		if errors.Is(err, ErrInvalidIndex) {
+			if len(r.walogs) == 1 {
+				// when walogs is empty, return true
+				return true, nil, nil
+			}
+			return false, nil, err
+		} else {
 			// use snapshot to recover
 			return false, nil, err
 		}
+
 	}
 
 	if term != prevLogTerm {
-		// log mismatch, rematch by leader next time
+		// walogs mismatch, rematch by leader next time
 		return false, &raftpb.LogEntry{
 			Index: prevLogIndex,
 			Term:  term,
@@ -220,11 +246,44 @@ func (r *raftNode) checkLogMatch(prevLogTerm, prevLogIndex uint64) (bool, *raftp
 	}
 
 	if r.lastLogIndex() > prevLogIndex {
-		// log out of range, need to resend
+		// walogs out of range, need to resend
 		return true, &raftpb.LogEntry{
 			Index: prevLogIndex,
 			Term:  term,
 		}, ErrNeedTruncate
 	}
 	return true, nil, nil
+}
+
+func (r *raftNode) firstDiffTermEntry(index, term uint64) (*raftpb.LogEntry, error) {
+	r.logger.Debug("firstDiffTermEntry entry", "index", index, "term", term)
+	defer r.logger.Debug("firstDiffTermEntry exit", "index", index, "term", term)
+
+	entry, err := r.logAtIndex(index)
+	if err != nil {
+		// no err expected
+		return nil, err
+	}
+
+	if entry.Term != term {
+		return nil, ErrInvalidIndex
+	}
+
+	var idx uint64 = 0
+	for i := len(r.walogs) - 1; i > 0; i-- {
+		if r.walogs[i].Term < term {
+			idx = r.walogs[i].Index
+			break
+		}
+	}
+
+	if idx == 0 {
+		// all walogs are the same term
+		return nil, ErrLogNotFound
+	}
+
+	return &raftpb.LogEntry{
+		Index: idx,
+		Term:  term - 1,
+	}, nil
 }

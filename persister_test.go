@@ -126,10 +126,10 @@ func TestFilePersister_SaveLogEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if p.logFile == "" {
-		t.Fatal("log file not set")
+		t.Fatal("walogs file not set")
 	}
 	if _, err := os.Stat(p.logFile); os.IsNotExist(err) {
-		t.Fatal("log file not exist")
+		t.Fatal("walogs file not exist")
 	}
 	file, err := os.OpenFile(p.logFile, os.O_RDONLY, 0666)
 	if err != nil {

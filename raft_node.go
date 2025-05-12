@@ -54,9 +54,9 @@ type raftNode struct {
 	currentTerm uint64
 	votedFor    string
 
-	// write ahead log 预写日志
-	log []*raftpb.LogEntry
-	mu  sync.RWMutex
+	// write ahead logs 预写日志
+	walogs []*raftpb.LogEntry
+	mu     sync.RWMutex
 
 	// volatile state on all servers
 	commitIndex uint64 // 已提交的日志索引
@@ -65,7 +65,7 @@ type raftNode struct {
 	// snapshot for state
 	snapshot *raftpb.Snapshot // 上一个状态的快照
 
-	// used for executing log entries
+	// used for executing walogs entries
 	stateMachine StateMachine // 状态机接口，用于执行日志条目
 
 	// used for persisting data
@@ -138,7 +138,7 @@ func New(config *Config) RaftNode {
 		role:               Follower,
 		currentTerm:        0,
 		votedFor:           VotedForNone,
-		log:                make([]*raftpb.LogEntry, 0),
+		walogs:             make([]*raftpb.LogEntry, 0),
 		commitIndex:        0,
 		lastApplied:        0,
 		snapshot:           nil,
@@ -171,8 +171,8 @@ func (r *raftNode) Start() error {
 	go r.processResponse(ctx)
 	// start install snapshot
 	go r.installSnapshot(ctx)
-	// start apply log
-	go r.applyStateMachine(ctx)
+	// start apply walogs
+	//go r.applyStateMachine(ctx)
 
 	server := grpc.NewServer()
 	raftpb.RegisterTRaftServiceServer(server, r)
@@ -201,7 +201,7 @@ func (r *raftNode) Recover() error {
 	if err != nil {
 		return err
 	}
-	r.log = entries
+	r.walogs = entries
 	snapshot, err := r.persister.LoadSnapshot()
 	if err != nil {
 		return err

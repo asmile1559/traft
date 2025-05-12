@@ -13,14 +13,14 @@ const (
 	LoggerLevel = slog.LevelDebug
 )
 
-func SetLogger() {
+func FormatLogger(module string) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,
 		Level:     LoggerLevel,
 	})
 
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	logger := slog.New(handler).With("module", module)
+	return logger
 }
 
 func RandomElectionTimeout() time.Duration {
@@ -44,7 +44,7 @@ func GetLatestFile(dir string, t PFileType) (string, error) {
 		patten = ".metadata"
 		err = ErrNoMetadataPersisted
 	case PLogFile:
-		patten = ".log"
+		patten = ".walogs"
 		err = ErrNoLogPersisted
 	case PSnapshotFile:
 		patten = ".snapshot"
