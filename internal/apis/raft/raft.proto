@@ -55,6 +55,7 @@ message InstallSnapshotReq {
   uint64 term = 1;
   string leader_id = 2;
   Snapshot snapshot = 3;
+  repeated LogEntry entries = 4;
 }
 
 message InstallSnapshotResp {

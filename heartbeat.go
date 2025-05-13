@@ -11,13 +11,9 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 	// 发送心跳
 	r.logger.Debug("init heartbeat")
 	defer r.logger.Debug("exit heartbeat")
-	for _, peer := range r.peers {
-		go r.heartbeatPeer(ctx, peer)
-	}
 	for {
 		select {
 		case <-ctx.Done():
-			// TODO: clean resources
 			return
 		case <-r.heartbeatTicker.C:
 			// if the ticker stops, it will not send heartbeats
@@ -25,50 +21,54 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 				continue
 			}
 			r.logger.Debug("send heartbeat")
-			r.startHeartbeat()
+			r.startHeartbeat(ctx)
 		}
 	}
 }
 
-func (r *raftNode) startHeartbeat() {
+func (r *raftNode) startHeartbeat(ctx context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	wg := sync.WaitGroup{}
 	for _, peer := range r.peers {
 		wg.Add(1)
 		go func(peer *Peer) {
 			defer wg.Done()
-			peer.NotifyHeartbeat()
+			r.sendHeartbeat(ctx, peer)
 		}(peer)
 	}
 	wg.Wait()
 }
 
-func (r *raftNode) heartbeatPeer(ctx context.Context, peer *Peer) {
-	select {
-	case <-ctx.Done():
-		// TODO: clean resources
-		return
-	case <-peer.RecvNotifyHeartbeatChan():
-		r.logger.Debug("received heartbeat")
-		prevLogIndex := peer.NextIndex() - 1
-		prevLogTerm, err := r.getLogTerm(prevLogIndex)
-		if err != nil {
+func (r *raftNode) sendHeartbeat(ctx context.Context, peer *Peer) {
+	r.logger.Debug("send heartbeat")
+	prevLogIndex := peer.NextIndex() - 1
+	prevLogTerm, err := r.getLogTerm(prevLogIndex)
+	if err != nil {
+		if len(r.walogs) > 1 {
 			r.installSnapshotC <- peer.Id()
 			return
-		}
-		req := &raftpb.AppendEntriesReq{
-			Term:         r.currentTerm,
-			LeaderId:     r.id,
-			PrevLogIndex: prevLogIndex,
-			PrevLogTerm:  prevLogTerm,
-			LeaderCommit: r.commitIndex,
-			Entries:      nil,
-		}
 
-		client := raftpb.NewTRaftServiceClient(peer.cc)
-		resp, err := client.AppendEntries(ctx, req)
-		r.handleResultC <- &Result{
-			PeerID: peer.Id(),
-			Resp:   resp,
 		}
+	}
+	req := &raftpb.AppendEntriesReq{
+		Term:         r.currentTerm,
+		LeaderId:     r.id,
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		LeaderCommit: r.commitIndex,
+		Entries:      nil,
+	}
+
+	client := raftpb.NewTRaftServiceClient(peer.cc)
+	resp, err := client.AppendEntries(ctx, req)
+	r.handleResultC <- &Result{
+		PeerID: peer.Id(),
+		Resp:   resp,
 	}
 }

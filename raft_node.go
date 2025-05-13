@@ -26,12 +26,12 @@ type RaftNode interface {
 	heartbeat(ctx context.Context)
 	listenAppendEntriesRequest(ctx context.Context)
 	listenHandleResult(ctx context.Context)
-
+	listenInstallSnapshotRequest(ctx context.Context)
 	// candidate
 	election(ctx context.Context)
 
 	// Start the raft node
-	Start() error
+	Serve() error
 
 	// recover the raft node
 	Recover() error
@@ -150,7 +150,7 @@ func New(config *Config) RaftNode {
 	}
 }
 
-func (r *raftNode) Start() error {
+func (r *raftNode) Serve() error {
 	r.logger.Debug("start raft node")
 	defer r.logger.Debug("finish raft node")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -165,7 +165,7 @@ func (r *raftNode) Start() error {
 	// start process response
 	// go r.processResponse(ctx)
 	// start install snapshot
-	go r.installSnapshot(ctx)
+	//go r.installSnapshot(ctx)
 	// start apply walogs
 	//go r.applyStateMachine(ctx)
 

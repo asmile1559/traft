@@ -2,8 +2,14 @@ package traft
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
+)
+
+var (
+	ErrKVStateMachineInvalidOperation = errors.New("invalid operation")
 )
 
 type StateMachine interface {
@@ -46,7 +52,8 @@ func (k *KVStateMachine) ApplyLog(logData []byte) error {
 	}{}
 
 	if err := json.Unmarshal(logData, &kv); err != nil {
-		k.logger.Error("ApplyLog failed", "error", err.Error())
+		err = fmt.Errorf("%w, error: %s", ErrStateMachineApplyLogFailed, err.Error())
+		k.logger.Error(err.Error())
 		return err
 	}
 
@@ -56,8 +63,10 @@ func (k *KVStateMachine) ApplyLog(logData []byte) error {
 	case "delete":
 		delete(k.store, kv.Key)
 	default:
-		k.logger.Error("Unknown operation", "operation", kv.Operation)
-		return ErrUnknownKVStateMachineOperation
+		// unknown operation
+		err := fmt.Errorf("%w, operation: %s", ErrKVStateMachineInvalidOperation, kv.Operation)
+		k.logger.Error(err.Error())
+		return err
 	}
 	return nil
 }
@@ -69,7 +78,8 @@ func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 	defer k.logger.Debug("ApplySnapshot exit", "snapshotData", string(snapshotData))
 
 	if err := json.Unmarshal(snapshotData, &k.store); err != nil {
-		k.logger.Error("ApplySnapshot failed", "error", err.Error())
+		err = fmt.Errorf("%w, error: %s", ErrStateMachineApplySnapshotFailed, err.Error())
+		k.logger.Error(err.Error())
 		return err
 	}
 	return nil
@@ -83,7 +93,8 @@ func (k *KVStateMachine) TakeSnapshot() ([]byte, error) {
 
 	snapshotData, err := json.Marshal(k.store)
 	if err != nil {
-		k.logger.Error("TakeSnapshot failed", "error", err.Error())
+		err = fmt.Errorf("%w, error: %s", ErrStateMachineTakeSnapshotFailed, err.Error())
+		k.logger.Error(err.Error())
 		return nil, err
 	}
 	return snapshotData, nil

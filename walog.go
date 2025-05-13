@@ -2,6 +2,7 @@ package traft
 
 import (
 	"errors"
+	"fmt"
 
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
@@ -14,6 +15,10 @@ import (
 
 // walog@v1: use a slice to store walogs, the first element is a dummy walogs entry.
 // TODO: walog@v2: use a cyclic queue to store walogs, auto compact when the walogs is full.
+
+var (
+	WALogEnd uint64 = 0xFFFFFFFFFFFFFFFF
+)
 
 func (r *raftNode) lastLogIndex() uint64 {
 	r.logger.Debug("lastLogIndex entry")
@@ -312,4 +317,46 @@ func (r *raftNode) cutoffLogsByIndex(index uint64) {
 	between := lastIndex - index
 	cutIndex := n - 1 - int(between)
 	r.walogs = append(make([]*raftpb.LogEntry, 0, between+1), r.walogs[cutIndex:]...)
+}
+
+func (r *raftNode) extractLogEntries(start, end uint64) ([]*raftpb.LogEntry, error) {
+	r.logger.Debug("extractLogEntries entry", "start", start, "end", end)
+	defer r.logger.Debug("extractLogEntries exit", "start", start, "end", end)
+	if end == 0 {
+		err := fmt.Errorf("%w: start %d, end %d", ErrInvalidIndex, start, end)
+		return nil, err
+	}
+
+	if start > end {
+		err := fmt.Errorf("%w: start %d, end %d", ErrInvalidIndex, start, end)
+		return nil, err
+	}
+
+	if start > r.lastLogIndex() {
+		err := fmt.Errorf("%w: start %d, end %d, last index: %d", ErrLogOutOfRange, start, end, r.lastLogIndex())
+		return nil, err
+	}
+
+	if end < r.walogs[0].Index {
+		err := fmt.Errorf("%w: start %d, end %d, dummy index %d", ErrLogAlreadySnapshot, start, end, r.walogs[0].Index)
+		return nil, err
+	}
+
+	if start < r.walogs[0].Index {
+		start = r.walogs[0].Index
+	}
+	if end > r.lastLogIndex() {
+		end = r.lastLogIndex()
+	}
+
+	if start == end {
+		return []*raftpb.LogEntry{}, nil
+	}
+	logs := make([]*raftpb.LogEntry, 0, end-start+1)
+	for _, ent := range r.walogs {
+		if ent.Index >= start && ent.Index <= end {
+			logs = append(logs, ent)
+		}
+	}
+	return logs, nil
 }

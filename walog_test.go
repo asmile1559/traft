@@ -761,3 +761,118 @@ func TestCutoffLogsByIndex(t *testing.T) {
 		t.Errorf("expected walogs[0] to be {Index: 17, Term: 0}, got %+v", rn.walogs[0])
 	}
 }
+
+func TestExtractLogEntries(t *testing.T) {
+	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelDebug,
+	})
+
+	logger := slog.New(h)
+	rn := &raftNode{
+		walogs: []*raftpb.LogEntry{
+			{Index: 0, Term: 0},
+			{Index: 1, Term: 1},
+			{Index: 2, Term: 1},
+			{Index: 3, Term: 1},
+			{Index: 4, Term: 1},
+			{Index: 5, Term: 1},
+			{Index: 6, Term: 1},
+			{Index: 7, Term: 2},
+			{Index: 8, Term: 2},
+			{Index: 9, Term: 2},
+			{Index: 10, Term: 3},
+			{Index: 11, Term: 3},
+			{Index: 12, Term: 4},
+			{Index: 13, Term: 4},
+			{Index: 14, Term: 4},
+			{Index: 15, Term: 5},
+			{Index: 16, Term: 5},
+		},
+		logger: logger,
+	}
+
+	var start, end uint64 = 0, 16
+	entries, err := rn.extractLogEntries(start, end)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(entries) != 17 {
+		t.Errorf("expected entries length to be 17, got %d", len(entries))
+	}
+
+	start, end = 1, 5
+	entries, err = rn.extractLogEntries(start, end)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+
+	if len(entries) != 5 {
+		t.Errorf("expected entries length to be 5, got %d", len(entries))
+	}
+
+	for i := 0; i < len(entries); i++ {
+		if entries[i].Index != start+uint64(i) {
+			t.Errorf("expected entry index to be %d, got %d", start+uint64(i), entries[i].Index)
+		}
+	}
+
+	start, end = 5, 17
+	entries, err = rn.extractLogEntries(start, end)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(entries) != 12 {
+		t.Errorf("expected entries length to be 12, got %d", len(entries))
+	}
+	for i := 0; i < len(entries); i++ {
+		if entries[i].Index != start+uint64(i) {
+			t.Errorf("expected entry index to be %d, got %d", start+uint64(i), entries[i].Index)
+		}
+	}
+
+	start, end = 17, 19
+	entries, err = rn.extractLogEntries(start, end)
+	if err == nil {
+		t.Errorf("expected error for start %d and end %d, got nil", start, end)
+	}
+	if len(entries) != 0 {
+		t.Errorf("expected entries length to be 0, got %d", len(entries))
+	}
+
+	rn.walogs = []*raftpb.LogEntry{
+		{Index: 5, Term: 1},
+		{Index: 6, Term: 1},
+		{Index: 7, Term: 2},
+		{Index: 8, Term: 2},
+		{Index: 9, Term: 2},
+		{Index: 10, Term: 3},
+		{Index: 11, Term: 3},
+		{Index: 12, Term: 4},
+	}
+
+	start, end = 5, 12
+	entries, err = rn.extractLogEntries(start, end)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(entries) != 8 {
+		t.Errorf("expected entries length to be 8, got %d", len(entries))
+	}
+
+	for i := 0; i < len(entries); i++ {
+		if entries[i].Index != start+uint64(i) {
+			t.Errorf("expected entry index to be %d, got %d", start+uint64(i), entries[i].Index)
+		}
+	}
+
+	start, end = 7, 8
+	entries, err = rn.extractLogEntries(start, end)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected entries length to be 2, got %d", len(entries))
+	}
+
+}

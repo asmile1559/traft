@@ -4,6 +4,10 @@ import (
 	"context"
 )
 
+const (
+	MaxApplyLogs = 100
+)
+
 func (r *raftNode) listenApplyLogsRequest(ctx context.Context) {
 	for {
 		select {
@@ -22,12 +26,25 @@ func (r *raftNode) applyLogs() {
 		return
 	}
 
-	for i := 1; i < len(r.walogs); i++ {
-		if r.walogs[i].Index > r.commitIndex {
+	entries, err := r.extractLogEntries(r.lastApplied+1, r.commitIndex)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.Index > r.commitIndex {
 			break
 		}
-		_ = r.stateMachine.ApplyLog(r.walogs[i].Data)
+		_ = r.stateMachine.ApplyLog(entry.Data)
 		r.lastApplied++
 	}
-	r.cutoffLogsByIndex(r.lastApplied)
+	if Debug {
+		if r.lastApplied-r.walogs[0].Index >= 10 {
+			r.cutoffLogsByIndex(r.lastApplied)
+		}
+	} else {
+		if r.lastApplied-r.walogs[0].Index >= MaxApplyLogs {
+			r.cutoffLogsByIndex(r.lastApplied)
+		}
+	}
+	//r.cutoffLogsByIndex(r.lastApplied)
 }

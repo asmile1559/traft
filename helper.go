@@ -18,22 +18,29 @@ const (
 	// MaxElectionTimeout 最大选举超时范围, 单位为毫秒
 	MaxElectionTimeout = 300
 
-	Mode = "DEBUG"
+	Debug = true
 )
 
-func FormatLogger(module string) *slog.Logger {
+func FormatLogger(module string, args ...slog.Attr) *slog.Logger {
 	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,
 		Level:     LoggerLevel,
 	})
 
-	logger := slog.New(handler).With("module", module)
+	attrs := make([]any, 0, len(args)+1)
+	attrs = append(attrs, slog.String("module", module))
+	for _, arg := range args {
+		attrs = append(attrs, arg)
+	}
+	logger := slog.New(handler).With(
+		slog.Group("property", attrs...),
+	)
 	return logger
 }
 
 func RandomElectionTimeout() time.Duration {
 	// 随机选举超时时间，范围在 [150ms, 300ms]
-	if Mode == "DEBUG" {
+	if Debug {
 		return time.Hour
 	}
 	return time.Duration(MinElectionTimeout+rand.Intn(MaxElectionTimeout-MinElectionTimeout)) * time.Millisecond
@@ -41,7 +48,7 @@ func RandomElectionTimeout() time.Duration {
 
 func GetHeartbeatDuration() time.Duration {
 	// 心跳间隔时间，范围在 [50ms, 100ms]
-	if Mode == "DEBUG" {
+	if Debug {
 		return time.Hour
 	}
 	return HeartbeatInterval

@@ -2,11 +2,11 @@ package traft
 
 import (
 	"context"
+	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
 func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnapshotReq) (*raftpb.InstallSnapshotResp, error) {
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	resp := &raftpb.InstallSnapshotResp{
@@ -16,7 +16,11 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 
 	// reject when an old term request received
 	if req.Term < r.currentTerm {
-		return resp, nil
+		err := fmt.Errorf(
+			"%w: Caller{id: %s, term: %d}, Callee{id %s, term: %d}",
+			ErrTermDenied, req.LeaderId, req.Term, r.id, r.currentTerm,
+		)
+		return resp, err
 	}
 
 	// transition to follower when a new term request received
@@ -28,8 +32,21 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	r.electionTimer.Reset(RandomElectionTimeout())
 
 	// check if the snapshot is valid
-	if r.snapshot != nil && req.Snapshot.LastIncludedIndex <= r.snapshot.LastIncludedIndex {
-		return resp, nil
+	if req.Snapshot != nil && r.snapshot != nil &&
+		req.Snapshot.LastIncludedIndex <= r.snapshot.LastIncludedIndex {
+		err := fmt.Errorf(
+			"%w: Caller{id: %s, lastIncludedIndex: %d}, Callee{id %s, lastIncludedIndex: %d}",
+			ErrSnapshotOutOfDate, req.LeaderId, req.Snapshot.LastIncludedIndex, r.id, r.snapshot.LastIncludedIndex,
+		)
+		return resp, err
+	}
+
+	if req.Snapshot == nil && r.snapshot != nil {
+		err := fmt.Errorf(
+			"%w: Caller{id: %s, lastIncludedIndex is nil}, Callee{id %s, lastIncludedIndex: %d}",
+			ErrSnapshotOutOfDate, req.LeaderId, r.id, r.snapshot.LastIncludedIndex,
+		)
+		return resp, err
 	}
 
 	err := r.stateMachine.ApplySnapshot(req.Snapshot.Data)
@@ -38,14 +55,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	}
 
 	r.snapshot = req.Snapshot
-
-	if req.Snapshot.LastIncludedIndex < r.lastLogIndex() {
-		// truncate the walogs
-		_ = r.truncateLog(req.Snapshot.LastIncludedIndex)
-	} else {
-		r.walogs = make([]*raftpb.LogEntry, 0)
-	}
-
+	r.walogs = req.Entries
 	r.commitIndex = req.Snapshot.LastIncludedIndex
 	r.lastApplied = req.Snapshot.LastIncludedIndex
 
@@ -55,40 +65,45 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	return resp, nil
 }
 
-func (r *raftNode) installSnapshot(ctx context.Context) {
+func (r *raftNode) listenInstallSnapshotRequest(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 		return
 	case peerId := <-r.installSnapshotC:
+		r.logger.Debug(fmt.Sprintf("receive install snapshot, peer id: %s", peerId))
 		peer := r.peers[peerId]
 		if peer == nil {
-			// TODO: handle error
-			panic(ErrPeerIsNil)
+			r.logger.Error(fmt.Sprintf("peer %s not found", peerId))
+			return
 		}
-		r.installSnapshotPeer(ctx, peer)
+		r.sendHeartbeat(ctx, peer)
 	}
 }
 
-func (r *raftNode) installSnapshotPeer(ctx context.Context, peer *Peer) {
+func (r *raftNode) sendInstallSnapshot(ctx context.Context, peer *Peer) {
 	r.mu.RLock()
-	if r.snapshot == nil {
-		_, _ = r.compactLog()
-	}
+	defer r.mu.RUnlock()
 	req := &raftpb.InstallSnapshotReq{
 		Term:     r.currentTerm,
 		LeaderId: r.id,
 		Snapshot: r.snapshot,
+		Entries:  r.walogs,
 	}
-	r.mu.RUnlock()
 	resp, err := peer.SendInstallSnapshotRequest(ctx, req)
 	if err != nil {
+		r.logger.Error(fmt.Sprintf("send install snapshot to peer %s failed, error: %s", peer.Id(), err.Error()))
 		return
 	}
+
+	if resp.Success {
+		r.logger.Debug(fmt.Sprintf("send install snapshot to peer %s success", peer.Id()))
+		return
+	}
+
+	r.logger.Debug(fmt.Sprintf("send install snapshot to peer %s failed", peer.Id()))
+
 	if resp.Term > r.currentTerm {
 		r.transitionToFollower(resp.Term, VotedForNone)
 		return
-	}
-	if resp.Success {
-		r.appendEntriesC <- peer.Id()
 	}
 }
