@@ -8,24 +8,35 @@ var (
 	// ErrTermDenied when a requested term is less than the existing term
 	ErrTermDenied = errors.New("term denied")
 
-	ErrLogAlreadySnapshot = errors.New("walogs already snapshot")
-	ErrLogOutOfRange      = errors.New("walogs out of range")
-	ErrLogConflict        = errors.New("walogs conflict")
+	// WALogs errors:
 
-	ErrNeedTruncate  = errors.New("need truncate")
-	ErrInvalidIndex  = errors.New("invalid index")
-	ErrInvalidTerm   = errors.New("invalid term")
-	ErrTruncatedTerm = errors.New("truncated term")
-	ErrLogNotFound   = errors.New("walogs not found")
+	// ErrLogEntryCompacted when the given index is less than the dummy index
+	ErrLogEntryCompacted = errors.New("log entry already compacted")
+	// ErrLogIndexOutOfRange when the given index greater than the last log index
+	ErrLogIndexOutOfRange = errors.New("log index out of range")
+	// ErrLogEntryConflict when the given <term, index> pair does not match the existing log entry
+	ErrLogEntryConflict = errors.New("log entry conflict")
+	// ErrLogNeedTruncate when the matching log entry is not the last log entry
+	ErrLogNeedTruncate = errors.New("log need truncate")
+	// ErrLogInvalidIndex when the given index is invalid, usually is the dummy index
+	ErrLogInvalidIndex = errors.New("log invalid index")
+	// ErrLogInvalidTerm when the given term is invalid, usually is the dummy term
+	ErrLogInvalidTerm = errors.New("log invalid term")
+	// ErrLogEntryNotFound when the given index is not found in the walogs
+	ErrLogEntryNotFound = errors.New("log entry not found")
 
 	ErrPeerIsNotFound = errors.New("peer is nil")
 
-	ErrPersisterDirNotExist = errors.New("persister dir not exist")
-	ErrNoMetadataPersisted  = errors.New("no metadata persisted")
-	ErrNoLogPersisted       = errors.New("no walogs persisted")
-	ErrNoSnapshotPersisted  = errors.New("no snapshot persisted")
+	// Persister errors:
 
-	ErrUnknownKVStateMachineOperation = errors.New("unknown kv state machine operation")
+	// ErrDirectoryNotExist when the given directory does not exist and cannot be created
+	ErrDirectoryNotExist = errors.New("directory not exist")
+	// ErrNoMetadataPersisted when the metadata file does not exist
+	ErrNoMetadataPersisted = errors.New("no metadata persisted")
+	// ErrNoLogPersisted when the log file does not exist
+	ErrNoLogPersisted = errors.New("no log persisted")
+	// ErrNoSnapshotPersisted when the snapshot file does not exist
+	ErrNoSnapshotPersisted = errors.New("no snapshot persisted")
 
 	// Install Snapshot RPC errors:
 

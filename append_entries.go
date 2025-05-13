@@ -7,7 +7,7 @@ import (
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
-// AppendEntries is the raft heartbeat and walogs replication RPC.
+// AppendEntries is the raft waitHeartbeat and walogs replication RPC.
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -33,19 +33,19 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 		r.transitionToFollower(req.Term, req.LeaderId)
 	}
 
-	// reset electionTime to prevent election
+	// reset electionTime to prevent waitElection
 	r.electionTimer.Reset(RandomElectionTimeout())
 
 	resp.Term = r.currentTerm
 	ok, entry, err := r.checkLogMatch(req.PrevLogIndex, req.PrevLogTerm)
 
 	if !ok {
-		if errors.Is(err, ErrLogAlreadySnapshot) {
+		if errors.Is(err, ErrLogEntryCompacted) {
 			r.logger.Debug("reject AppendEntries request cause walogs already snapshot")
-		} else if errors.Is(err, ErrLogOutOfRange) {
+		} else if errors.Is(err, ErrLogIndexOutOfRange) {
 			r.logger.Debug("reject AppendEntries request cause walogs out of range")
 			resp.ConflictIndex = r.lastLogIndex() + 1
-		} else if errors.Is(err, ErrInvalidIndex) {
+		} else if errors.Is(err, ErrLogInvalidIndex) {
 			r.logger.Debug("reject AppendEntries request cause walogs invalid index")
 		} else {
 			r.logger.Debug("reject AppendEntries request cause walogs not match")
@@ -65,7 +65,7 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	}
 
 	r.logger.Debug("success AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
-	if errors.Is(err, ErrNeedTruncate) {
+	if errors.Is(err, ErrLogNeedTruncate) {
 		// walogs match, but need to truncate
 		_ = r.truncateLog(req.PrevLogIndex)
 	}
@@ -95,8 +95,8 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 }
 
 // When a follower transitions to a leader, it resets the nextIndex[] and matchIndex[]. The nextIndex[] is set to the
-// `lastLogIndex + 1`, and the matchIndex[] is set to 0. Then, the leader sends heartbeat to all peers. If the peer who
-// receives the heartbeat, it will check the walogs, and then feed back the `AppendEntriesResp` to the leader.
+// `lastLogIndex + 1`, and the matchIndex[] is set to 0. Then, the leader sends waitHeartbeat to all peers. If the peer who
+// receives the waitHeartbeat, it will check the walogs, and then feed back the `AppendEntriesResp` to the leader.
 
 // when a follower transitions to a leader, it calls this function
 func (r *raftNode) listenAppendEntriesRequest(ctx context.Context) {

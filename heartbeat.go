@@ -7,10 +7,10 @@ import (
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
-func (r *raftNode) heartbeat(ctx context.Context) {
+func (r *raftNode) waitHeartbeat(ctx context.Context) {
 	// 发送心跳
-	r.logger.Debug("init heartbeat")
-	defer r.logger.Debug("exit heartbeat")
+	r.logger.Debug("init waitHeartbeat")
+	defer r.logger.Debug("exit waitHeartbeat")
 	for {
 		select {
 		case <-ctx.Done():
@@ -20,7 +20,7 @@ func (r *raftNode) heartbeat(ctx context.Context) {
 			if r.role != Leader {
 				continue
 			}
-			r.logger.Debug("send heartbeat")
+			r.logger.Debug("send waitHeartbeat")
 			r.startHeartbeat(ctx)
 		}
 	}
@@ -46,7 +46,7 @@ func (r *raftNode) startHeartbeat(ctx context.Context) {
 }
 
 func (r *raftNode) sendHeartbeat(ctx context.Context, peer *Peer) {
-	r.logger.Debug("send heartbeat")
+	r.logger.Debug("send waitHeartbeat")
 	prevLogIndex := peer.NextIndex() - 1
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
 	if err != nil {

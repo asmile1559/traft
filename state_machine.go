@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 )
 
 var (
@@ -23,12 +22,13 @@ type StateMachine interface {
 	// TakeSnapshot
 	//	return: snapshotData, json-type
 	TakeSnapshot() ([]byte, error)
+
+	Close() error
 }
 
 type KVStateMachine struct {
 	// kv store
 	store  map[string]string
-	mu     sync.RWMutex
 	logger *slog.Logger
 }
 
@@ -40,8 +40,6 @@ func NewKVStateMachine() *KVStateMachine {
 }
 
 func (k *KVStateMachine) ApplyLog(logData []byte) error {
-	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.logger.Debug("ApplyLog entry", "logData", string(logData))
 	defer k.logger.Debug("ApplyLog exit", "logData", string(logData))
 
@@ -72,8 +70,6 @@ func (k *KVStateMachine) ApplyLog(logData []byte) error {
 }
 
 func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
-	k.mu.Lock()
-	defer k.mu.Unlock()
 	k.logger.Debug("ApplySnapshot entry", "snapshotData", string(snapshotData))
 	defer k.logger.Debug("ApplySnapshot exit", "snapshotData", string(snapshotData))
 
@@ -86,8 +82,6 @@ func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 }
 
 func (k *KVStateMachine) TakeSnapshot() ([]byte, error) {
-	k.mu.RLock()
-	defer k.mu.RUnlock()
 	k.logger.Debug("TakeSnapshot entry")
 	defer k.logger.Debug("TakeSnapshot exit")
 
@@ -98,4 +92,8 @@ func (k *KVStateMachine) TakeSnapshot() ([]byte, error) {
 		return nil, err
 	}
 	return snapshotData, nil
+}
+
+func (k *KVStateMachine) Close() error {
+	return nil
 }

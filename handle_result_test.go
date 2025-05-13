@@ -72,7 +72,7 @@ func TestHandleResult(t *testing.T) {
 		t.Errorf("expected nextIndex: 2, matchIndex: 1, got nextIndex: %d, matchIndex: %d", peer.NextIndex(), peer.MatchIndex())
 	}
 
-	// Test case 2: Failed AppendEntries response, ErrInvalidIndex and ErrLogAlreadySnapshot
+	// Test case 2: Failed AppendEntries response, ErrLogInvalidIndex and ErrLogEntryCompacted
 	result.Resp = &raftpb.AppendEntriesResp{
 		Term:          4,
 		Success:       false,
@@ -86,7 +86,7 @@ func TestHandleResult(t *testing.T) {
 		t.Errorf("expected installSnapshotC to be called with node1, got %s", id)
 	}
 
-	// Test case 3: Failed AppendEntries response, ErrLogOutOfRange
+	// Test case 3: Failed AppendEntries response, ErrLogIndexOutOfRange
 	result.Resp = &raftpb.AppendEntriesResp{
 		Term:          4,
 		Success:       false,
@@ -103,7 +103,7 @@ func TestHandleResult(t *testing.T) {
 		t.Errorf("expected nextIndex: 4, got %d", peer.NextIndex())
 	}
 
-	// Test case 4: Failed AppendEntries response, ErrLogConflict
+	// Test case 4: Failed AppendEntries response, ErrLogEntryConflict
 	result.Resp = &raftpb.AppendEntriesResp{
 		Term:          4,
 		Success:       false,

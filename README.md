@@ -23,8 +23,8 @@ while still being efficient and fault-tolerant.
 | snapshot                | a snapshot of the state machine at a given point in time. This is used to reduce the size of the walogs and improve performance.                                                             |
 | append entries          | a message sent from the leader to the followers to replicate walogs entries. It contains the term number, the index of the last entry, and the entries to be replicated.                     |
 | request vote            | a message sent from a candidate to the other nodes in the cluster to request votes. It contains the term number, the index of the last entry, and the candidate ID.                       |
-| heartbeat               | a message sent from the leader to the followers to keep them alive. It contains the term number and the index of the last entry.                                                          |
-| election timeout        | the amount of time a node will wait before starting an election. This is used to prevent split votes and ensure that a leader is elected quickly.                                         |
+| waitHeartbeat               | a message sent from the leader to the followers to keep them alive. It contains the term number and the index of the last entry.                                                          |
+| waitElection timeout        | the amount of time a node will wait before starting an waitElection. This is used to prevent split votes and ensure that a leader is elected quickly.                                         |
 | append entries response | a message sent from the followers to the leader in response to an append entries request. It contains the term number and the index of the last entry.                                    |
 | request vote response   | a message sent from the other nodes in the cluster in response to a request vote request. It contains the term number and a boolean value indicating whether the vote was granted or not. |
 | state machine           | the application that is being replicated across the nodes in the cluster. It is responsible for applying the walogs entries and maintaining the state of the application.                    |
@@ -48,7 +48,7 @@ consistency. The process of raft two-phase commit is as follows:
 3. If the leader receives a majority of agreement `AppendEntriesResponse` messages from followers, it commits the walogs
    locally
    and invoke the state machine to apply the walogs entry.
-4. The leader will send a commit index when the next heartbeat, indicating that the walogs entry has been committed.
+4. The leader will send a commit index when the next waitHeartbeat, indicating that the walogs entry has been committed.
 5. The followers will compare the commit index with their own logs and apply the walogs entry to their state machine if it
    is greater than their own commit index.
 
@@ -105,7 +105,7 @@ walogs. If there is any follower returns a false value, the leader will process 
     - If the error is about `walogs conflict`, the leader will decrement the `nextIndex` of the follower to the
       first walogs entry's index with the same `conflictTerm` and send a new `AppendEntriesRequest` to the follower.
 
-BE AWARE: No matter heartbeat or append entries(write request), walogs invalidation will be invoked.
+BE AWARE: No matter waitHeartbeat or append entries(write request), walogs invalidation will be invoked.
 
 A brief flow chart is shown below:
 

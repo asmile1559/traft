@@ -39,11 +39,13 @@ func (r *raftNode) applyLogs() {
 	}
 	if Debug {
 		if r.lastApplied-r.walogs[0].Index >= 10 {
-			r.cutoffLogsByIndex(r.lastApplied)
+			_ = r.compactLog()
+			//r.cutoffLogsByIndex(r.lastApplied)
 		}
 	} else {
 		if r.lastApplied-r.walogs[0].Index >= MaxApplyLogs {
-			r.cutoffLogsByIndex(r.lastApplied)
+			//r.cutoffLogsByIndex(r.lastApplied)
+			_ = r.compactLog()
 		}
 	}
 	//r.cutoffLogsByIndex(r.lastApplied)

@@ -1,23 +1,12 @@
 package traft
 
 import (
+	"google.golang.org/grpc"
 	"net"
 	"os"
-	"os/signal"
-	"syscall"
-
-	"google.golang.org/grpc"
 )
 
-func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener) {
-
-	// signal to stop the election and heartbeat goroutines
-	sigC := make(chan os.Signal, 1)
-	signal.Notify(sigC,
-		os.Interrupt,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-	)
+func (r *raftNode) gracefulStop(server *grpc.Server, listener net.Listener, sigC <-chan os.Signal) {
 
 	// wait for the signal
 	<-sigC

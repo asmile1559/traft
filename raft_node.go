@@ -3,13 +3,11 @@ package traft
 import (
 	"context"
 	"log/slog"
-	"net"
 	"os"
 	"sync"
 	"time"
 
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -22,18 +20,21 @@ type RaftNode interface {
 	transitionToCandidate()
 	transitionToLeader()
 
-	// leader
-	heartbeat(ctx context.Context)
+	listenApplyLogsRequest(ctx context.Context)
 	listenAppendEntriesRequest(ctx context.Context)
-	listenHandleResult(ctx context.Context)
+	listenHandleResultRequest(ctx context.Context)
 	listenInstallSnapshotRequest(ctx context.Context)
-	// candidate
-	election(ctx context.Context)
 
-	// Start the raft node
+	// leader
+	waitHeartbeat(ctx context.Context)
+
+	// candidate
+	waitElection(ctx context.Context)
+
+	// Serve the raft node
 	Serve() error
 
-	// recover the raft node
+	// Recover the raft node
 	Recover() error
 }
 
@@ -67,11 +68,11 @@ type raftNode struct {
 	persister Persister // 持久化接口，持久化数据
 
 	// 选举定时器
-	// when electionTimer expires, start a new election, it used by follower and candidate
+	// when electionTimer expires, start a new waitElection, it used by follower and candidate
 	electionTimer *time.Timer
 
 	// 心跳定时器
-	// when heartbeatTicker expires, send heartbeat to all followers, it used by leader
+	// when heartbeatTicker expires, send waitHeartbeat to all followers, it used by leader
 	heartbeatTicker *time.Ticker
 
 	applyC           chan struct{}
@@ -133,7 +134,7 @@ func New(config *Config) RaftNode {
 		role:             Follower,
 		currentTerm:      0,
 		votedFor:         VotedForNone,
-		walogs:           make([]*raftpb.LogEntry, 0),
+		walogs:           make([]*raftpb.LogEntry, 1),
 		commitIndex:      0,
 		lastApplied:      0,
 		snapshot:         nil,
@@ -148,60 +149,4 @@ func New(config *Config) RaftNode {
 		peers:            peers,
 		logger:           logger,
 	}
-}
-
-func (r *raftNode) Serve() error {
-	r.logger.Debug("start raft node")
-	defer r.logger.Debug("finish raft node")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// start election
-	go r.election(ctx)
-	// start heartbeat
-	go r.heartbeat(ctx)
-	// start append entries
-	// go r.appendEntries(ctx)
-	// start process response
-	// go r.processResponse(ctx)
-	// start install snapshot
-	//go r.installSnapshot(ctx)
-	// start apply walogs
-	//go r.applyStateMachine(ctx)
-
-	server := grpc.NewServer()
-	raftpb.RegisterTRaftServiceServer(server, r)
-	listener, err := net.Listen("tcp", r.addr)
-	if err != nil {
-		panic(err)
-	}
-	go func() {
-		if err := server.Serve(listener); err != nil {
-			panic(err)
-		}
-	}()
-
-	r.gracefulStop(server, listener)
-	return nil
-}
-
-func (r *raftNode) Recover() error {
-	term, votedFor, err := r.persister.LoadMetadata()
-	if err != nil {
-		return err
-	}
-	r.currentTerm = term
-	r.votedFor = votedFor
-	entries, err := r.persister.LoadLogEntries()
-	if err != nil {
-		return err
-	}
-	r.walogs = entries
-	snapshot, err := r.persister.LoadSnapshot()
-	if err != nil {
-		return err
-	}
-	r.snapshot = snapshot
-	_ = r.stateMachine.ApplySnapshot(snapshot.Data)
-	return nil
 }

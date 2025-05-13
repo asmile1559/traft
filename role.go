@@ -1,5 +1,7 @@
 package traft
 
+import "fmt"
+
 type Role string
 
 const (
@@ -37,8 +39,8 @@ func (r *raftNode) transitionToCandidate() {
 	// 开启选举定时器
 	err := r.persister.SaveMetadata(r.currentTerm, r.votedFor)
 	if err != nil {
-		// TODO: 处理错误
-		panic(err)
+		err = fmt.Errorf("%w: %s", err, "failed to save metadata")
+		r.logger.Error(err.Error())
 	}
 	r.electionTimer.Reset(RandomElectionTimeout())
 	// 关闭心跳定时器

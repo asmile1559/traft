@@ -10,23 +10,6 @@ import (
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
-//		{Index: 1, Term: 1, Data: []byte(`{"operation": "put", "key": "a", "value": "1"}`)},
-//			{Index: 2, Term: 1, Data: []byte(`{"operation": "put", "key": "b", "value": "2"}`)},
-//			{Index: 3, Term: 1, Data: []byte(`{"operation": "put", "key": "c", "value": "3"}`)},
-//			{Index: 4, Term: 1, Data: []byte(`{"operation": "put", "key": "d", "value": "4"}`)},
-//			{Index: 5, Term: 1, Data: []byte(`{"operation": "put", "key": "e", "value": "5"}`)},
-//			{Index: 6, Term: 1, Data: []byte(`{"operation": "put", "key": "f", "value": "6"}`)},
-//			{Index: 7, Term: 2, Data: []byte(`{"operation": "put", "key": "g", "value": "7"}`)},
-//			{Index: 8, Term: 2, Data: []byte(`{"operation": "put", "key": "h", "value": "8"}`)},
-//			{Index: 9, Term: 2, Data: []byte(`{"operation": "put", "key": "i", "value": "9"}`)},
-//			{Index: 10, Term: 3, Data: []byte(`{"operation": "put", "key": "j", "value": "10"}`)},
-//			{Index: 11, Term: 3, Data: []byte(`{"operation": "put", "key": "k", "value": "11"}`)},
-//			{Index: 12, Term: 4, Data: []byte(`{"operation": "put", "key": "l", "value": "12"}`)},
-//			{Index: 13, Term: 4, Data: []byte(`{"operation": "put", "key": "m", "value": "13"}`)},
-//			{Index: 14, Term: 4, Data: []byte(`{"operation": "put", "key": "n", "value": "14"}`)},
-//			{Index: 15, Term: 5, Data: []byte(`{"operation": "put", "key": "o", "value": "15"}`)},
-//			{Index: 16, Term: 5, Data: []byte(`{"operation": "put", "key": "p", "value": "16"}`)},
-
 func TestRaftNode_AppendEntries(t *testing.T) {
 	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,
@@ -262,7 +245,7 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test case 1: ErrInvalidIndex
+	// Test case 1: ErrLogInvalidIndex
 	req := &raftpb.AppendEntriesReq{
 		Term:         4,
 		LeaderId:     "node2",
@@ -293,7 +276,7 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		{Index: 7, Term: 4, Data: []byte(`{"operation": "put", "key": "g", "value": "7"}`)},
 		{Index: 8, Term: 4, Data: []byte(`{"operation": "put", "key": "h", "value": "8"}`)},
 	}
-	// Test case 2: ErrLogConflict
+	// Test case 2: ErrLogEntryConflict
 	req = &raftpb.AppendEntriesReq{
 		Term:         4,
 		LeaderId:     "node1",
@@ -313,7 +296,7 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		t.Fatalf("unexpected conflict term and index: %d, %d\n", resp.ConflictTerm, resp.ConflictIndex)
 	}
 
-	// Test case 3: ErrLogOutOfRange
+	// Test case 3: ErrLogIndexOutOfRange
 	req = &raftpb.AppendEntriesReq{
 		Term:         4,
 		LeaderId:     "node1",
@@ -334,7 +317,7 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		t.Fatalf("unexpected conflict term and index: %d, %d\n", resp.ConflictTerm, resp.ConflictIndex)
 	}
 
-	// Test case 4: ErrLogAlreadySnapshot
+	// Test case 4: ErrLogEntryCompacted
 	rn.walogs = []*raftpb.LogEntry{
 		{Index: 5, Term: 1, Data: []byte(`{"operation": "put", "key": "e", "value": "5"}`)},
 		{Index: 6, Term: 1, Data: []byte(`{"operation": "put", "key": "f", "value": "6"}`)},

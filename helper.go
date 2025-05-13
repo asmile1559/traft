@@ -18,7 +18,7 @@ const (
 	// MaxElectionTimeout 最大选举超时范围, 单位为毫秒
 	MaxElectionTimeout = 300
 
-	Debug = true
+	Debug = false
 )
 
 func FormatLogger(module string, args ...slog.Attr) *slog.Logger {
@@ -56,7 +56,7 @@ func GetHeartbeatDuration() time.Duration {
 
 func GetLatestFile(dir string, t PFileType) (string, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return "", ErrPersisterDirNotExist
+		return "", ErrDirectoryNotExist
 	}
 
 	entries, err := os.ReadDir(dir)

@@ -26,6 +26,8 @@ type Persister interface {
 
 	SaveSnapshot(snapshot *raftpb.Snapshot) error
 	LoadSnapshot() (*raftpb.Snapshot, error)
+
+	Close() error
 }
 
 type FilePersister struct {
@@ -40,7 +42,6 @@ type FilePersister struct {
 func NewFilePersister(dir string) *FilePersister {
 	err := os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
-		//TODO: handle error
 		panic(err)
 	}
 	return &FilePersister{
@@ -216,4 +217,8 @@ func (p *FilePersister) LoadSnapshot() (*raftpb.Snapshot, error) {
 	var snapshot *raftpb.Snapshot
 	err = dec.Decode(&snapshot)
 	return snapshot, err
+}
+
+func (p *FilePersister) Close() error {
+	return nil
 }

@@ -28,7 +28,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 		r.transitionToFollower(req.Term, req.LeaderId)
 	}
 
-	// reset electionTime to prevent election
+	// reset electionTime to prevent waitElection
 	r.electionTimer.Reset(RandomElectionTimeout())
 
 	// check if the snapshot is valid

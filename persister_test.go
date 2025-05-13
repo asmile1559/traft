@@ -57,22 +57,22 @@ func TestFilePersister_checkBeforeLoad(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrPersisterDirNotExist) {
-		t.Fatal("expected ErrPersisterDirNotExist, got", err)
+	if !errors.Is(err, ErrDirectoryNotExist) {
+		t.Fatal("expected ErrDirectoryNotExist, got", err)
 	}
 	_, err = p.checkBeforeLoad(PMetadataFile)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrPersisterDirNotExist) {
-		t.Fatal("expected ErrPersisterDirNotExist, got", err)
+	if !errors.Is(err, ErrDirectoryNotExist) {
+		t.Fatal("expected ErrDirectoryNotExist, got", err)
 	}
 	_, err = p.checkBeforeLoad(PSnapshotFile)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !errors.Is(err, ErrPersisterDirNotExist) {
-		t.Fatal("expected ErrPersisterDirNotExist, got", err)
+	if !errors.Is(err, ErrDirectoryNotExist) {
+		t.Fatal("expected ErrDirectoryNotExist, got", err)
 	}
 }
 

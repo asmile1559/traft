@@ -383,26 +383,20 @@ func TestCompactLog(t *testing.T) {
 		logger:       logger,
 	}
 
-	entry, err := rn.compactLog()
+	err := rn.compactLog()
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
-	}
-	if entry.LastIncludedIndex != 0 || entry.LastIncludedTerm != 0 || entry.Data != nil {
-		t.Errorf("expected compacted walogs entry to be {Index: 0, Term: 0}, got %+v", entry)
 	}
 
 	for i := 1; i <= 5; i++ {
 		_ = kv.ApplyLog(rn.walogs[i].Data)
 		rn.lastApplied++
 	}
-	snapshot, err := rn.compactLog()
+
+	err = rn.compactLog()
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 		return
-	}
-
-	if snapshot.LastIncludedIndex != 5 || snapshot.LastIncludedTerm != 1 {
-		t.Errorf("expected compacted walogs entry to be {Index: 5, Term: 1}, got %+v", snapshot)
 	}
 
 	if len(rn.walogs) != 12 {
@@ -412,8 +406,6 @@ func TestCompactLog(t *testing.T) {
 	if rn.walogs[0].Index != 5 || rn.walogs[0].Term != 1 {
 		t.Errorf("expected walogs[0] to be {Index: 5, Term: 1}, got %+v", rn.walogs[0])
 	}
-
-	t.Log(string(snapshot.Data))
 }
 
 func TestTrunctateLog(t *testing.T) {
@@ -517,19 +509,19 @@ func TestCheckLogMatch(t *testing.T) {
 		if match != tc.expected {
 			t.Errorf("expected log match for index %d and term %d to be %v, got %v", tc.index, tc.term, tc.expected, match)
 		}
-		if errors.Is(err, ErrInvalidIndex) {
+		if errors.Is(err, ErrLogInvalidIndex) {
 			if entry != nil {
 				t.Errorf("expected entry to not be nil, got %+v", entry)
 			}
-		} else if errors.Is(err, ErrLogConflict) {
+		} else if errors.Is(err, ErrLogEntryConflict) {
 			if entry.Index != 8 || entry.Term == 3 {
 				t.Errorf("expected entry to be {Index: 8, Term: 3}, got %+v", entry)
 			}
-		} else if errors.Is(err, ErrNeedTruncate) {
+		} else if errors.Is(err, ErrLogNeedTruncate) {
 			if !(entry.Index == 6 || entry.Index == 7) {
 				t.Errorf("expected entry to be {Index: 6, Term: 1} or {Index: 7, Term: 2}, got %+v", entry)
 			}
-		} else if errors.Is(err, ErrLogOutOfRange) {
+		} else if errors.Is(err, ErrLogIndexOutOfRange) {
 			if entry != nil {
 				t.Errorf("expected entry to be {Index: 17, Term: 0}, got %+v", entry)
 			}
@@ -570,11 +562,11 @@ func TestCheckLogMatch(t *testing.T) {
 		if match != tc.expected {
 			t.Errorf("expected log match for index %d and term %d to be %v, got %v", tc.index, tc.term, tc.expected, match)
 		}
-		if errors.Is(err, ErrLogAlreadySnapshot) {
+		if errors.Is(err, ErrLogEntryCompacted) {
 			if entry != nil {
 				t.Errorf("expected entry to be nil, got %+v", entry)
 			}
-		} else if errors.Is(err, ErrNeedTruncate) {
+		} else if errors.Is(err, ErrLogNeedTruncate) {
 			if entry.Index != 6 {
 				t.Errorf("expected entry to be {Index: 6, Term: 1}, got %+v", entry)
 			}

@@ -10,7 +10,7 @@ type Result struct {
 	Resp   *raftpb.AppendEntriesResp
 }
 
-func (r *raftNode) listenHandleResult(ctx context.Context) {
+func (r *raftNode) listenHandleResultRequest(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -49,12 +49,12 @@ func (r *raftNode) handleResult(ctx context.Context, result *Result) {
 	}
 
 	if resp.ConflictTerm == 0 && resp.ConflictIndex == 0 {
-		// ErrInvalidIndex or ErrLogAlreadySnapshot
+		// ErrLogInvalidIndex or ErrLogEntryCompacted
 		r.installSnapshotC <- id
 		return
 	}
 
-	// ErrLogOutOfRange in follower
+	// ErrLogIndexOutOfRange in follower
 	if resp.ConflictTerm == 0 {
 		r.logger.Debug("reject, reset nextIndex", "peerId", id)
 		peer.UpdateNextIndex(resp.ConflictIndex)
