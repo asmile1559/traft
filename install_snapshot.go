@@ -14,12 +14,14 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 		Success: false,
 	}
 
-	// reject when an old term request received
+	r.logger.Debug(fmt.Sprintf("[InstallSnapshot] id: {%s}", r.id))
+
 	if req.Term < r.currentTerm {
 		err := fmt.Errorf(
-			"%w: Caller{id: %s, term: %d}, Callee{id %s, term: %d}",
-			ErrTermDenied, req.LeaderId, req.Term, r.id, r.currentTerm,
+			"%w: leader term %d, current term %d",
+			ErrWithLowPriorityTerm, req.Term, r.currentTerm,
 		)
+		r.logger.Debug(err.Error())
 		return resp, err
 	}
 
@@ -35,7 +37,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 	if req.Snapshot != nil && r.snapshot != nil &&
 		req.Snapshot.LastIncludedIndex <= r.snapshot.LastIncludedIndex {
 		err := fmt.Errorf(
-			"%w: Caller{id: %s, lastIncludedIndex: %d}, Callee{id %s, lastIncludedIndex: %d}",
+			"%w: Leader{id: %s, lastIncludedIndex: %d}, Self{id %s, lastIncludedIndex: %d}",
 			ErrSnapshotOutOfDate, req.LeaderId, req.Snapshot.LastIncludedIndex, r.id, r.snapshot.LastIncludedIndex,
 		)
 		return resp, err
@@ -43,7 +45,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 
 	if req.Snapshot == nil && r.snapshot != nil {
 		err := fmt.Errorf(
-			"%w: Caller{id: %s, lastIncludedIndex is nil}, Callee{id %s, lastIncludedIndex: %d}",
+			"%w: Leader{id: %s, lastIncludedIndex is nil}, Self{id %s, lastIncludedIndex: %d}",
 			ErrSnapshotOutOfDate, req.LeaderId, r.id, r.snapshot.LastIncludedIndex,
 		)
 		return resp, err
@@ -51,6 +53,7 @@ func (r *raftNode) InstallSnapshot(ctx context.Context, req *raftpb.InstallSnaps
 
 	err := r.stateMachine.ApplySnapshot(req.Snapshot.Data)
 	if err != nil {
+		err = fmt.Errorf("%w: %s", err, "failed to apply snapshot")
 		return resp, err
 	}
 

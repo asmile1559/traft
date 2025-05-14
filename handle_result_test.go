@@ -86,7 +86,7 @@ func TestHandleResult(t *testing.T) {
 		t.Errorf("expected installSnapshotC to be called with node1, got %s", id)
 	}
 
-	// Test case 3: Failed AppendEntries response, ErrLogIndexOutOfRange
+	// Test case 3: Failed AppendEntries response, ErrLogOutOfRange
 	result.Resp = &raftpb.AppendEntriesResp{
 		Term:          4,
 		Success:       false,

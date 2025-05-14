@@ -45,6 +45,19 @@ func (r *raftNode) handleResult(ctx context.Context, result *Result) {
 		// update nextIndex and matchIndex
 		peer.UpdateNextIndex(resp.MatchIndex + 1)
 		peer.UpdateMatchIndex(resp.MatchIndex)
+		for {
+			cnt := 0
+			for _, peer := range r.peers {
+				if peer.MatchIndex() > r.commitIndex {
+					cnt++
+				}
+			}
+			if 2*cnt < len(r.peers)+1 {
+				break
+			}
+			r.commitIndex++
+		}
+		r.applyC <- struct{}{}
 		return
 	}
 
@@ -54,7 +67,7 @@ func (r *raftNode) handleResult(ctx context.Context, result *Result) {
 		return
 	}
 
-	// ErrLogIndexOutOfRange in follower
+	// ErrLogOutOfRange in follower
 	if resp.ConflictTerm == 0 {
 		r.logger.Debug("reject, reset nextIndex", "peerId", id)
 		peer.UpdateNextIndex(resp.ConflictIndex)

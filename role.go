@@ -15,8 +15,7 @@ func (r *raftNode) Role() Role {
 }
 
 func (r *raftNode) transitionToFollower(term uint64, votedFor string) {
-	r.logger.Debug("start transition to follower")
-	defer r.logger.Debug("finish transition to follower")
+	r.logger.Debug(fmt.Sprintf("[TransitionToFollower] id: {%s}", r.id))
 	r.role = Follower
 	// 更新当前任期
 	r.currentTerm = term
@@ -29,8 +28,7 @@ func (r *raftNode) transitionToFollower(term uint64, votedFor string) {
 }
 
 func (r *raftNode) transitionToCandidate() {
-	r.logger.Debug("start transition to candidate")
-	defer r.logger.Debug("finish transition to candidate")
+	r.logger.Debug(fmt.Sprintf("[TransitionToCandidate] id: {%s}", r.id))
 	r.role = Candidate
 	// 更新当前任期
 	r.currentTerm++
@@ -48,20 +46,18 @@ func (r *raftNode) transitionToCandidate() {
 }
 
 func (r *raftNode) transitionToLeader() {
-	r.logger.Debug("start transition to leader")
-	defer r.logger.Debug("finish transition to leader")
+	r.logger.Debug(fmt.Sprintf("[TransitionToLeader] id: {%s}", r.id))
 	r.role = Leader
 	// 开启心跳定时器
 	r.heartbeatTicker.Reset(HeartbeatInterval)
 	// 关闭选举定时器
 	r.electionTimer.Stop()
 
-	r.mu.Lock()
 	nextIndex := r.lastLogIndex() + 1
+	r.logger.Debug(fmt.Sprintf("nextIndex is %d", nextIndex))
 	// 初始化 nextIndex 和 matchIndex
 	for _, peer := range r.peers {
 		peer.Reset(nextIndex)
 	}
 	_ = r.persister.SaveMetadata(r.currentTerm, r.votedFor)
-	r.mu.Unlock()
 }

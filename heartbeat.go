@@ -2,6 +2,7 @@ package traft
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
@@ -20,7 +21,6 @@ func (r *raftNode) waitHeartbeat(ctx context.Context) {
 			if r.role != Leader {
 				continue
 			}
-			r.logger.Debug("send waitHeartbeat")
 			r.startHeartbeat(ctx)
 		}
 	}
@@ -46,14 +46,13 @@ func (r *raftNode) startHeartbeat(ctx context.Context) {
 }
 
 func (r *raftNode) sendHeartbeat(ctx context.Context, peer *Peer) {
-	r.logger.Debug("send waitHeartbeat")
+	r.logger.Debug(fmt.Sprintf("send heartbeat to peer %s", peer.Id()))
 	prevLogIndex := peer.NextIndex() - 1
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
 		if len(r.walogs) > 1 {
 			r.installSnapshotC <- peer.Id()
 			return
-
 		}
 	}
 	req := &raftpb.AppendEntriesReq{

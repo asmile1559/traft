@@ -41,7 +41,6 @@ func NewKVStateMachine() *KVStateMachine {
 
 func (k *KVStateMachine) ApplyLog(logData []byte) error {
 	k.logger.Debug("ApplyLog entry", "logData", string(logData))
-	defer k.logger.Debug("ApplyLog exit", "logData", string(logData))
 
 	kv := struct {
 		Operation string `json:"operation"`
@@ -71,7 +70,6 @@ func (k *KVStateMachine) ApplyLog(logData []byte) error {
 
 func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 	k.logger.Debug("ApplySnapshot entry", "snapshotData", string(snapshotData))
-	defer k.logger.Debug("ApplySnapshot exit", "snapshotData", string(snapshotData))
 
 	if err := json.Unmarshal(snapshotData, &k.store); err != nil {
 		err = fmt.Errorf("%w, error: %s", ErrStateMachineApplySnapshotFailed, err.Error())
@@ -83,7 +81,6 @@ func (k *KVStateMachine) ApplySnapshot(snapshotData []byte) error {
 
 func (k *KVStateMachine) TakeSnapshot() ([]byte, error) {
 	k.logger.Debug("TakeSnapshot entry")
-	defer k.logger.Debug("TakeSnapshot exit")
 
 	snapshotData, err := json.Marshal(k.store)
 	if err != nil {

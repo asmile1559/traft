@@ -2,10 +2,11 @@ package traft
 
 import (
 	"context"
+	"fmt"
 )
 
 const (
-	MaxApplyLogs = 100
+	MaxApplyLogs = 10
 )
 
 func (r *raftNode) listenApplyLogsRequest(ctx context.Context) {
@@ -27,6 +28,7 @@ func (r *raftNode) applyLogs() {
 	}
 
 	entries, err := r.extractLogEntries(r.lastApplied+1, r.commitIndex)
+	r.logger.Debug(fmt.Sprintf("Extracted log entries: %v", entries))
 	if err != nil {
 		return
 	}
@@ -37,14 +39,16 @@ func (r *raftNode) applyLogs() {
 		_ = r.stateMachine.ApplyLog(entry.Data)
 		r.lastApplied++
 	}
+	r.logger.Debug(fmt.Sprintf("Last applied entries index: %d", r.lastApplied))
 	if Debug {
-		if r.lastApplied-r.walogs[0].Index >= 10 {
+		if r.lastApplied-r.walogs[0].Index >= 3 {
 			_ = r.compactLog()
 			//r.cutoffLogsByIndex(r.lastApplied)
 		}
 	} else {
 		if r.lastApplied-r.walogs[0].Index >= MaxApplyLogs {
 			//r.cutoffLogsByIndex(r.lastApplied)
+			r.logger.Debug(fmt.Sprint("Applied log index ", r.walogs[0].Index))
 			_ = r.compactLog()
 		}
 	}

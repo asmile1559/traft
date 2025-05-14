@@ -2,14 +2,19 @@ package traft
 
 import (
 	"context"
+	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
 func (r *raftNode) RequestVote(ctx context.Context, req *raftpb.RequestVoteReq) (*raftpb.RequestVoteResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.logger.Debug("received RequestVote", "req", req)
-	defer r.logger.Debug("completed RequestVote", "req", req)
+
+	r.logger.Debug(fmt.Sprintf(
+		"Receive a RequsteVote RPC request. Candidate{id: %s, term: %d}",
+		req.CandidateId, req.Term,
+	))
+
 	resp := &raftpb.RequestVoteResp{
 		Term:        r.currentTerm,
 		VoteGranted: false,
@@ -17,6 +22,10 @@ func (r *raftNode) RequestVote(ctx context.Context, req *raftpb.RequestVoteReq) 
 
 	// reject old term vote request
 	if req.Term < r.currentTerm {
+		r.logger.Debug(fmt.Sprintf(
+			"reject RequestVote request cause old term, Candidate{id: %s, term: %d}, Self{id %s, term: %d}",
+			req.CandidateId, req.Term, r.id, r.currentTerm,
+		))
 		return resp, nil
 	}
 
@@ -28,6 +37,9 @@ func (r *raftNode) RequestVote(ctx context.Context, req *raftpb.RequestVoteReq) 
 
 	if r.role != Follower {
 		// only followers could vote, reject if r is not a follower
+		r.logger.Debug(fmt.Sprintf(
+			"Reject RequestVote request cause not follower[role %s]", r.role,
+		))
 		return resp, nil
 	}
 

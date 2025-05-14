@@ -3,7 +3,6 @@ package traft
 import (
 	"context"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
@@ -36,6 +35,8 @@ type RaftNode interface {
 
 	// Recover the raft node
 	Recover() error
+
+	AppendLogEntry(entry *raftpb.LogEntry) error
 }
 
 type raftNode struct {
@@ -118,23 +119,13 @@ func New(config *Config) RaftNode {
 
 	peerCount := len(peers)
 
-	h := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
-		Level:     slog.LevelDebug,
-	})
-
-	logger := slog.New(h).With(
-		"raft_id", config.Id,
-		"raft_addr", config.Addr,
-	)
-
 	return &raftNode{
 		id:               config.Id,
 		addr:             config.Addr,
 		role:             Follower,
 		currentTerm:      0,
 		votedFor:         VotedForNone,
-		walogs:           make([]*raftpb.LogEntry, 1),
+		walogs:           []*raftpb.LogEntry{{Index: 0, Term: 0}},
 		commitIndex:      0,
 		lastApplied:      0,
 		snapshot:         nil,
@@ -147,6 +138,10 @@ func New(config *Config) RaftNode {
 		handleResultC:    make(chan *Result, 2*peerCount),
 		installSnapshotC: make(chan string, 2*peerCount),
 		peers:            peers,
-		logger:           logger,
+		logger: FormatLogger("raft_node",
+			slog.Group("properties",
+				"id", config.Id,
+				"addr", config.Addr),
+		),
 	}
 }

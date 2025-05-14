@@ -5,15 +5,17 @@ import "errors"
 var (
 	// Common errors:
 
-	// ErrTermDenied when a requested term is less than the existing term
-	ErrTermDenied = errors.New("term denied")
+	// ErrWithLowPriorityTerm when the given term is less than the current term
+	ErrWithLowPriorityTerm = errors.New("with low priority term")
+	// ErrWithLowPriorityTerm when the match index is not the same as last log index
+	ErrMatchIndexIsNotFit = errors.New("match index is not fit")
 
 	// WALogs errors:
 
 	// ErrLogEntryCompacted when the given index is less than the dummy index
 	ErrLogEntryCompacted = errors.New("log entry already compacted")
-	// ErrLogIndexOutOfRange when the given index greater than the last log index
-	ErrLogIndexOutOfRange = errors.New("log index out of range")
+	// ErrLogOutOfRange when the given index greater than the last log index
+	ErrLogOutOfRange = errors.New("log out of range")
 	// ErrLogEntryConflict when the given <term, index> pair does not match the existing log entry
 	ErrLogEntryConflict = errors.New("log entry conflict")
 	// ErrLogNeedTruncate when the matching log entry is not the last log entry
@@ -24,6 +26,8 @@ var (
 	ErrLogInvalidTerm = errors.New("log invalid term")
 	// ErrLogEntryNotFound when the given index is not found in the walogs
 	ErrLogEntryNotFound = errors.New("log entry not found")
+	// ErrLogWrongIndexEntryToAppend when the given index is not match the existing log entry
+	ErrLogWrongIndexEntryToAppend = errors.New("log wrong index entry to append")
 
 	ErrPeerIsNotFound = errors.New("peer is nil")
 

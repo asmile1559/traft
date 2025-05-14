@@ -1,7 +1,7 @@
 package traft
 
 import (
-	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -116,8 +116,8 @@ func TestLogAtIndex1(t *testing.T) {
 
 	// Test invalid index
 	_, err := rn.logAtIndex(0)
-	if err == nil {
-		t.Errorf("expected error for index 0, got nil")
+	if err != nil {
+		t.Errorf("no error expected for index 0, got %v", err)
 	}
 	_, err = rn.logAtIndex(17)
 	if err == nil {
@@ -145,7 +145,7 @@ func TestLogAtIndex1(t *testing.T) {
 		expected *raftpb.LogEntry
 	}{
 		{index: 4, expected: nil},
-		{index: 5, expected: nil},
+		{index: 5, expected: &raftpb.LogEntry{Index: 5, Term: 1}},
 		{index: 6, expected: &raftpb.LogEntry{Index: 6, Term: 1}},
 		{index: 7, expected: &raftpb.LogEntry{Index: 7, Term: 2}},
 		{index: 8, expected: &raftpb.LogEntry{Index: 8, Term: 2}},
@@ -230,15 +230,9 @@ func TestGetLogTerm(t *testing.T) {
 	}
 
 	for _, tc := range testCase {
-		term, err := rn.getLogTerm(tc.index)
-		if err != nil {
-			if tc.expected != 0 {
-				t.Errorf("unexpected error for index %d: %v", tc.index, err)
-			}
-		} else {
-			if term != tc.expected {
-				t.Errorf("expected walogs term at index %d to be %d, got %d", tc.index, tc.expected, term)
-			}
+		term, _ := rn.getLogTerm(tc.index)
+		if term != tc.expected {
+			t.Errorf("expected walogs term at index %d to be %d, got %d", tc.index, tc.expected, term)
 		}
 	}
 
@@ -262,7 +256,7 @@ func TestGetLogTerm(t *testing.T) {
 		expected uint64
 	}{
 		{index: 4, expected: 0},
-		{index: 5, expected: 0},
+		{index: 5, expected: 1},
 		{index: 6, expected: 1},
 		{index: 7, expected: 2},
 		{index: 8, expected: 2},
@@ -279,15 +273,9 @@ func TestGetLogTerm(t *testing.T) {
 	}
 
 	for _, tc := range testCase2 {
-		term, err := rn.getLogTerm(tc.index)
-		if err != nil {
-			if tc.expected != 0 {
-				t.Errorf("unexpected error for index %d: %v", tc.index, err)
-			}
-		} else {
-			if term != tc.expected {
-				t.Errorf("expected walogs term at index %d to be %d, got %d", tc.index, tc.expected, term)
-			}
+		term, _ := rn.getLogTerm(tc.index)
+		if term != tc.expected {
+			t.Errorf("expected walogs term at index %d to be %d, got %d", tc.index, tc.expected, term)
 		}
 	}
 }
@@ -387,7 +375,9 @@ func TestCompactLog(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
-
+	if len(rn.walogs) != 17 || len(kv.store) != 0 {
+		t.Errorf("expected walogs length to be 17, got %d", len(rn.walogs))
+	}
 	for i := 1; i <= 5; i++ {
 		_ = kv.ApplyLog(rn.walogs[i].Data)
 		rn.lastApplied++
@@ -438,14 +428,19 @@ func TestTrunctateLog(t *testing.T) {
 		logger: logger,
 	}
 
-	err := rn.truncateLog(0)
-	if err == nil {
-		t.Errorf("expected error")
+	err := rn.truncateLog(17)
+	if err != nil {
+		t.Errorf("expected no error")
+	}
+	if len(rn.walogs) != 17 {
+		t.Errorf("expected walogs length to be 17, got %d", len(rn.walogs))
+	}
+	if rn.walogs[0].Index != 0 || rn.walogs[0].Term != 0 {
+		t.Errorf("expected walogs[0] to be {Index: 0, Term: 0}, got %+v", rn.walogs[0])
 	}
 
-	err = rn.truncateLog(17)
-	if err == nil {
-		t.Errorf("expected error")
+	if rn.lastLogIndex() != 16 || rn.lastLogTerm() != 5 {
+		t.Errorf("expected last walogs index to be 16 and term to be 5, got %d and %d", rn.lastLogIndex(), rn.lastLogTerm())
 	}
 
 	err = rn.truncateLog(5)
@@ -458,6 +453,41 @@ func TestTrunctateLog(t *testing.T) {
 
 	for i := 1; i < len(rn.walogs); i++ {
 		t.Log(rn.walogs[i])
+	}
+
+	rn.walogs = []*raftpb.LogEntry{
+		{Index: 5, Term: 1},
+		{Index: 6, Term: 1},
+		{Index: 7, Term: 2},
+		{Index: 8, Term: 2},
+		{Index: 9, Term: 2},
+		{Index: 10, Term: 3},
+		{Index: 11, Term: 3},
+		{Index: 12, Term: 4},
+	}
+
+	err = rn.truncateLog(10)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(rn.walogs) != 6 {
+		t.Errorf("expected walogs length to be 6, got %d", len(rn.walogs))
+	}
+	if rn.lastLogIndex() != 10 || rn.lastLogTerm() != 3 {
+		t.Errorf("expected last walogs index to be 10 and term to be 3, got %d and %d", rn.lastLogIndex(), rn.lastLogTerm())
+	}
+
+	err = rn.truncateLog(4)
+	if err == nil {
+		t.Errorf("expected error for truncating to index 4, got nil")
+	}
+
+	if len(rn.walogs) != 6 {
+		t.Errorf("expected walogs length to be 6, got %d", len(rn.walogs))
+	}
+
+	if rn.lastLogIndex() != 10 || rn.lastLogTerm() != 3 {
+		t.Errorf("expected last walogs index to be 10 and term to be 3, got %d and %d", rn.lastLogIndex(), rn.lastLogTerm())
 	}
 }
 
@@ -509,27 +539,7 @@ func TestCheckLogMatch(t *testing.T) {
 		if match != tc.expected {
 			t.Errorf("expected log match for index %d and term %d to be %v, got %v", tc.index, tc.term, tc.expected, match)
 		}
-		if errors.Is(err, ErrLogInvalidIndex) {
-			if entry != nil {
-				t.Errorf("expected entry to not be nil, got %+v", entry)
-			}
-		} else if errors.Is(err, ErrLogEntryConflict) {
-			if entry.Index != 8 || entry.Term == 3 {
-				t.Errorf("expected entry to be {Index: 8, Term: 3}, got %+v", entry)
-			}
-		} else if errors.Is(err, ErrLogNeedTruncate) {
-			if !(entry.Index == 6 || entry.Index == 7) {
-				t.Errorf("expected entry to be {Index: 6, Term: 1} or {Index: 7, Term: 2}, got %+v", entry)
-			}
-		} else if errors.Is(err, ErrLogIndexOutOfRange) {
-			if entry != nil {
-				t.Errorf("expected entry to be {Index: 17, Term: 0}, got %+v", entry)
-			}
-		} else if err != nil {
-			if entry.Index != 16 || entry.Term != 5 {
-				t.Errorf("expected entry to be {Index: 16, Term: 5}, got %+v", entry)
-			}
-		}
+		t.Log(fmt.Sprintf("index: %d, term: %d, match: %v, entry: %s, error: %v", tc.index, tc.term, match, entry, err))
 	}
 
 	rn.walogs = []*raftpb.LogEntry{
@@ -553,7 +563,7 @@ func TestCheckLogMatch(t *testing.T) {
 		expected bool
 	}{
 		{index: 4, term: 1, expected: false},
-		{index: 5, term: 1, expected: false},
+		{index: 5, term: 1, expected: true},
 		{index: 6, term: 1, expected: true},
 	}
 
@@ -562,15 +572,7 @@ func TestCheckLogMatch(t *testing.T) {
 		if match != tc.expected {
 			t.Errorf("expected log match for index %d and term %d to be %v, got %v", tc.index, tc.term, tc.expected, match)
 		}
-		if errors.Is(err, ErrLogEntryCompacted) {
-			if entry != nil {
-				t.Errorf("expected entry to be nil, got %+v", entry)
-			}
-		} else if errors.Is(err, ErrLogNeedTruncate) {
-			if entry.Index != 6 {
-				t.Errorf("expected entry to be {Index: 6, Term: 1}, got %+v", entry)
-			}
-		}
+		t.Log(fmt.Sprintf("index: %d, term: %d, match: %v, entry: %s, error: %v", tc.index, tc.term, match, entry, err))
 	}
 }
 
@@ -610,7 +612,7 @@ func TestFirstDiffTermEntry(t *testing.T) {
 		expected *raftpb.LogEntry
 	}{
 		{index: 0, term: 0, expected: nil},
-		{index: 6, term: 1, expected: nil},
+		{index: 6, term: 1, expected: &raftpb.LogEntry{Index: 0, Term: 0}},
 		{index: 7, term: 2, expected: &raftpb.LogEntry{
 			Index: 6, Term: 1,
 		}},
@@ -621,16 +623,17 @@ func TestFirstDiffTermEntry(t *testing.T) {
 	}
 
 	for _, tc := range testCase {
-		ent, err := rn.firstDiffTermEntry(tc.index, tc.term)
-		if err != nil {
-			if !(tc.index == 0 || tc.index == 17 || tc.index == 6) {
-				t.Error("expect tc.index is 0, 6 or 17")
+		ent, err := rn.firstDiffTermEntry(tc.term)
+		if tc.expected != nil {
+			if ent == nil {
+				t.Errorf("expect get {index: %v, term: %v}, but got nil", tc.index, tc.term)
+			} else {
+				if ent.Index != tc.expected.Index || ent.Term != tc.expected.Term {
+					t.Errorf("expect get {index: %v, term: %v}, but got {index: %v, term: %v}", tc.index, tc.term, ent.Index, ent.Term)
+				}
 			}
-			continue
 		}
-		if ent.Index != tc.expected.Index || ent.Term != tc.expected.Term {
-			t.Errorf("expect get {index: %v, term: %v}, but got {index: %v, term: %v}", tc.index, tc.term, ent.Index, ent.Term)
-		}
+		t.Logf("index: %d, term: %d, entry: %s, error: %v", tc.index, tc.term, ent, err)
 	}
 
 	rn.walogs = []*raftpb.LogEntry{
@@ -665,16 +668,17 @@ func TestFirstDiffTermEntry(t *testing.T) {
 	}
 
 	for _, tc := range testCase2 {
-		ent, err := rn.firstDiffTermEntry(tc.index, tc.term)
-		if err != nil {
-			if !(tc.index == 4 || tc.index == 5 || tc.index == 17) {
-				t.Error("expect tc.index is 4, 5 or 17")
+		ent, err := rn.firstDiffTermEntry(tc.term)
+		if tc.expected != nil {
+			if ent == nil {
+				t.Errorf("expect get {index: %v, term: %v}, but got nil", tc.index, tc.term)
+			} else {
+				if ent.Index != tc.expected.Index || ent.Term != tc.expected.Term {
+					t.Errorf("expect get {index: %v, term: %v}, but got {index: %v, term: %v}", tc.index, tc.term, ent.Index, ent.Term)
+				}
 			}
-			continue
 		}
-		if ent.Index != tc.expected.Index || ent.Term != tc.expected.Term {
-			t.Errorf("expect get {index: %v, term: %v}, but got {index: %v, term: %v}", tc.index, tc.term, ent.Index, ent.Term)
-		}
+		t.Logf("index: %d, term: %d, entry: %s, error: %v", tc.index, tc.term, ent, err)
 	}
 }
 

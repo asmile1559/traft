@@ -3,6 +3,7 @@ package traft
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
@@ -11,8 +12,11 @@ import (
 func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesReq) (*raftpb.AppendEntriesResp, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.logger.Debug("received AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
-	defer r.logger.Debug("exit AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
+	if len(req.Entries) == 0 {
+		r.logger.Debug(fmt.Sprintf("[Heartbeat], From {%s}", req))
+	} else {
+		r.logger.Debug(fmt.Sprintf("[AppendEntries], From {%s}", req))
+	}
 
 	resp := &raftpb.AppendEntriesResp{
 		Term:          r.currentTerm,
@@ -24,8 +28,12 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 
 	// reject when an old term request received
 	if req.Term < r.currentTerm {
-		r.logger.Debug("reject AppendEntries request cause old term", "term", req.Term, "currentTerm", r.currentTerm)
-		return resp, nil
+		err := fmt.Errorf(
+			"%w: leader term %d, current term %d",
+			ErrWithLowPriorityTerm, req.Term, r.currentTerm,
+		)
+		r.logger.Debug(err.Error())
+		return resp, err
 	}
 
 	// transition to follower when a new term request received
@@ -40,33 +48,26 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	ok, entry, err := r.checkLogMatch(req.PrevLogIndex, req.PrevLogTerm)
 
 	if !ok {
-		if errors.Is(err, ErrLogEntryCompacted) {
-			r.logger.Debug("reject AppendEntries request cause walogs already snapshot")
-		} else if errors.Is(err, ErrLogIndexOutOfRange) {
-			r.logger.Debug("reject AppendEntries request cause walogs out of range")
+		if errors.Is(err, ErrLogOutOfRange) {
 			resp.ConflictIndex = r.lastLogIndex() + 1
-		} else if errors.Is(err, ErrLogInvalidIndex) {
-			r.logger.Debug("reject AppendEntries request cause walogs invalid index")
-		} else {
-			r.logger.Debug("reject AppendEntries request cause walogs not match")
+		} else if errors.Is(err, ErrLogEntryConflict) {
 			ct := entry.Term
-			ci := entry.Index
 			// find the first walogs entry whose term is not conflictTerm
-			ent, err := r.firstDiffTermEntry(ci, ct)
-			if err != nil {
-				r.logger.Debug("reject AppendEntries request cause walogs not match", "err", err)
-			} else {
-				r.logger.Debug("reject AppendEntries request cause walogs not match", "conflictTerm", ct, "conflictIndex", entry.Index+1)
+			ent, Err := r.firstDiffTermEntry(ct)
+			if Err == nil {
 				resp.ConflictIndex = ent.Index + 1
 				resp.ConflictTerm = ct
 			}
 		}
-		return resp, nil
+		err := fmt.Errorf(
+			"[Reject] %w: check log match failed, prevLog<index: %d, term: %d>",
+			err, req.PrevLogIndex, req.PrevLogTerm,
+		)
+		r.logger.Debug(err.Error())
+		return resp, err
 	}
 
-	r.logger.Debug("success AppendEntries request", "term", req.Term, "leaderId", req.LeaderId)
 	if errors.Is(err, ErrLogNeedTruncate) {
-		// walogs match, but need to truncate
 		_ = r.truncateLog(req.PrevLogIndex)
 	}
 
@@ -78,7 +79,12 @@ func (r *raftNode) AppendEntries(ctx context.Context, req *raftpb.AppendEntriesR
 	resp.MatchIndex = req.PrevLogIndex + uint64(len(req.Entries))
 	if resp.MatchIndex > r.lastLogIndex() {
 		// should not happen
-		r.logger.Error("the match index is greater than the last log index", "matchIndex", resp.MatchIndex, "lastLogIndex", r.lastLogIndex())
+		err := fmt.Errorf(
+			"[SHOULD NOT HAPPEN] %w: matchIndex %d, lastLogIndex %d",
+			ErrLogOutOfRange, resp.MatchIndex, r.lastLogIndex(),
+		)
+		r.logger.Error(err.Error())
+		return resp, err
 	}
 
 	// update commit index
@@ -105,10 +111,11 @@ func (r *raftNode) listenAppendEntriesRequest(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case peerId := <-r.appendEntriesC:
-			r.logger.Debug("send append entries to peer", "peer id", peerId)
+			r.logger.Debug(fmt.Sprintf("send AppendEntriesRequest to peerId: %s", peerId))
 			peer, ok := r.peers[peerId]
 			if !ok {
-				r.logger.Error("no such peer in the cluster", "peer id", peerId)
+				err := fmt.Errorf("%w: %s", ErrPeerIsNotFound, peerId)
+				r.logger.Error(err.Error())
 				continue
 			}
 			go r.sendAppendEntries(ctx, peer)
@@ -124,13 +131,14 @@ func (r *raftNode) sendAppendEntries(ctx context.Context, peer *Peer) {
 		return
 	default:
 	}
-	r.logger.Debug("enter append entries to peer", "peerId", peer.Id())
-	defer r.logger.Debug("exit append entries to peer", "peerId", peer.Id())
 	prevLogIndex := peer.NextIndex() - 1
 	prevLogTerm, err := r.getLogTerm(prevLogIndex)
 	if err != nil {
-		r.installSnapshotC <- peer.Id()
-		return
+		r.logger.Debug("reach here")
+		if r.snapshot != nil && len(r.walogs) > 0 {
+			r.installSnapshotC <- peer.Id()
+			return
+		}
 	}
 	req := &raftpb.AppendEntriesReq{
 		Term:         r.currentTerm,
@@ -145,4 +153,20 @@ func (r *raftNode) sendAppendEntries(ctx context.Context, peer *Peer) {
 		PeerID: peer.Id(),
 		Resp:   resp,
 	}
+}
+
+func (r *raftNode) AppendLogEntry(entry *raftpb.LogEntry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lastIndex := r.lastLogIndex()
+	if entry.Index != lastIndex+1 {
+		err := fmt.Errorf("%w: expect: %d, got: %d", ErrLogWrongIndexEntryToAppend, lastIndex+1, entry.Index)
+		r.logger.Error(err.Error())
+		return err
+	}
+	r.walogs = append(r.walogs, entry)
+	for peer := range r.peers {
+		r.appendEntriesC <- peer
+	}
+	return nil
 }

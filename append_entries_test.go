@@ -55,11 +55,8 @@ func TestRaftNode_AppendEntries(t *testing.T) {
 	}
 
 	resp, err := rn.AppendEntries(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v\n", err)
-	}
-	if resp.Success != false {
-		t.Fatalf("unexpected success\n")
+	if err == nil || (resp != nil && resp.Success) {
+		t.Fatalf("append entries should fail, but got: %v\n", resp)
 	}
 
 	// Test case 2: request with a term equal to the current term
@@ -258,8 +255,8 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v\n", err)
 	}
-	if resp.Success != false {
-		t.Fatalf("unexpected success\n")
+	if resp.Success == false {
+		t.Fatalf("unexpected failure\n")
 	}
 	if resp.ConflictTerm != 0 || resp.ConflictIndex != 0 {
 		t.Fatalf("unexpected conflict term and index: %d, %d\n", resp.ConflictTerm, resp.ConflictIndex)
@@ -286,9 +283,6 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		LeaderCommit: 0,
 	}
 	resp, err = rn.AppendEntries(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v\n", err)
-	}
 	if resp.Success != false {
 		t.Fatalf("unexpected success\n")
 	}
@@ -296,7 +290,7 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		t.Fatalf("unexpected conflict term and index: %d, %d\n", resp.ConflictTerm, resp.ConflictIndex)
 	}
 
-	// Test case 3: ErrLogIndexOutOfRange
+	// Test case 3: ErrLogOutOfRange
 	req = &raftpb.AppendEntriesReq{
 		Term:         4,
 		LeaderId:     "node1",
@@ -307,9 +301,6 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 	}
 
 	resp, err = rn.AppendEntries(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v\n", err)
-	}
 	if resp.Success != false {
 		t.Fatalf("unexpected success\n")
 	}
@@ -339,11 +330,8 @@ func TestRaftNode_AppendEntries2(t *testing.T) {
 		LeaderCommit: 5,
 	}
 	resp, err = rn.AppendEntries(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v\n", err)
-	}
-	if resp.Success != false {
-		t.Fatalf("unexpected success\n")
+	if resp.Success == false {
+		t.Fatalf("unexpected failure\n")
 	}
 	if resp.ConflictTerm != 0 || resp.ConflictIndex != 0 {
 		t.Fatalf("unexpected conflict term and index: %d, %d\n", resp.ConflictTerm, resp.ConflictIndex)
