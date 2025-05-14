@@ -60,7 +60,7 @@ func TestRaft1(t *testing.T) {
 		Addr:         "localhost:12333",
 		StateMachine: sm1,
 		Persister:    pe1,
-		Peers:        map[string]string{"abc": "localhost:12333", "def": "localhost:12334"},
+		Peers:        map[string]string{"abc": "localhost:12333", "def": "localhost:12334", "ghi": "localhost:12335"},
 	}
 
 	raft1 := New(cf1)
@@ -75,7 +75,7 @@ func TestRaft1(t *testing.T) {
 		Addr:         "localhost:12334",
 		StateMachine: sm2,
 		Persister:    pe2,
-		Peers:        map[string]string{"abc": "localhost:12333", "def": "localhost:12334"},
+		Peers:        map[string]string{"abc": "localhost:12333", "def": "localhost:12334", "ghi": "localhost:12335"},
 	}
 	raft2 := New(cf2)
 	if raft2 == nil {
@@ -94,6 +94,20 @@ func TestRaft1(t *testing.T) {
 			return
 		}
 	}()
+
+	sm3 := NewKVStateMachine()
+	pe3 := NewFilePersister("./test/raft3")
+	cf3 := &Config{
+		Id:           "ghi",
+		Addr:         "localhost:12335",
+		StateMachine: sm3,
+		Persister:    pe3,
+		Peers:        map[string]string{"abc": "localhost:12333", "def": "localhost:12334", "ghi": "localhost:12335"},
+	}
+	raft3 := New(cf3)
+	if raft3 == nil {
+		t.Fatal("raft3 is nil")
+	}
 
 	time.Sleep(1 * time.Second)
 	fmt.Println()
@@ -120,5 +134,12 @@ func TestRaft1(t *testing.T) {
 			time.Sleep(1 * time.Second)
 		}
 	}
+
+	go func() {
+		err := raft3.Serve()
+		if err != nil {
+			return
+		}
+	}()
 	time.Sleep(1 * time.Hour)
 }

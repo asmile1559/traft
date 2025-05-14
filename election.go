@@ -61,6 +61,9 @@ func (r *raftNode) startElection(ctx context.Context) {
 	}()
 
 	for resp := range respChan {
+		if resp == nil {
+			continue
+		}
 		if resp.Term > r.currentTerm {
 			// 如果收到的任期比当前任期大，转化为 follower
 			r.transitionToFollower(resp.Term, VotedForNone)

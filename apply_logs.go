@@ -42,14 +42,15 @@ func (r *raftNode) applyLogs() {
 	r.logger.Debug(fmt.Sprintf("Last applied entries index: %d", r.lastApplied))
 	if Debug {
 		if r.lastApplied-r.walogs[0].Index >= 3 {
+			r.logger.Debug("Compacting logs")
 			_ = r.compactLog()
 			//r.cutoffLogsByIndex(r.lastApplied)
 		}
 	} else {
 		if r.lastApplied-r.walogs[0].Index >= MaxApplyLogs {
-			//r.cutoffLogsByIndex(r.lastApplied)
-			r.logger.Debug(fmt.Sprint("Applied log index ", r.walogs[0].Index))
+			r.logger.Debug("Compacting logs")
 			_ = r.compactLog()
+			//r.cutoffLogsByIndex(r.lastApplied)
 		}
 	}
 	//r.cutoffLogsByIndex(r.lastApplied)

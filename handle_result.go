@@ -2,6 +2,7 @@ package traft
 
 import (
 	"context"
+	"fmt"
 	raftpb "github.com/asmile1559/traft/internal/apis/raft"
 )
 
@@ -30,7 +31,11 @@ func (r *raftNode) handleResult(ctx context.Context, result *Result) {
 		return
 	default:
 	}
-	r.logger.Debug("start handle result", "peerId", result.PeerID)
+	r.logger.Debug(
+		fmt.Sprintf("Receive AppendEntriesResp from peerId: %s, Resp:%v",
+			result.PeerID, result.Resp,
+		),
+	)
 	id := result.PeerID
 	resp := result.Resp
 	peer := r.peers[id]
@@ -41,7 +46,6 @@ func (r *raftNode) handleResult(ctx context.Context, result *Result) {
 	}
 
 	if resp.Success {
-		r.logger.Debug("success append entries response from peer", "peerId", id)
 		// update nextIndex and matchIndex
 		peer.UpdateNextIndex(resp.MatchIndex + 1)
 		peer.UpdateMatchIndex(resp.MatchIndex)

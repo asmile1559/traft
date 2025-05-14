@@ -111,7 +111,6 @@ func (r *raftNode) listenAppendEntriesRequest(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case peerId := <-r.appendEntriesC:
-			r.logger.Debug(fmt.Sprintf("send AppendEntriesRequest to peerId: %s", peerId))
 			peer, ok := r.peers[peerId]
 			if !ok {
 				err := fmt.Errorf("%w: %s", ErrPeerIsNotFound, peerId)
@@ -140,15 +139,25 @@ func (r *raftNode) sendAppendEntries(ctx context.Context, peer *Peer) {
 			return
 		}
 	}
+	entries, _ := r.extractLogEntries(prevLogIndex+1, WALogEnd)
 	req := &raftpb.AppendEntriesReq{
 		Term:         r.currentTerm,
 		LeaderId:     r.id,
 		PrevLogIndex: prevLogIndex,
 		PrevLogTerm:  prevLogTerm,
 		LeaderCommit: r.commitIndex,
-		Entries:      r.walogs[prevLogIndex+1:],
+		Entries:      entries,
 	}
+	r.logger.Debug(
+		fmt.Sprintf(
+			"[SendAppendEntries] To {%s}, Req: %s",
+			peer.id, req,
+		),
+	)
 	resp, err := peer.SendAppendEntriesRequest(ctx, req)
+	if resp == nil {
+		return
+	}
 	r.handleResultC <- &Result{
 		PeerID: peer.Id(),
 		Resp:   resp,

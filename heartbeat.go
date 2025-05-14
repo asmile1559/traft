@@ -66,6 +66,9 @@ func (r *raftNode) sendHeartbeat(ctx context.Context, peer *Peer) {
 
 	client := raftpb.NewTRaftServiceClient(peer.cc)
 	resp, err := client.AppendEntries(ctx, req)
+	if resp == nil {
+		return
+	}
 	r.handleResultC <- &Result{
 		PeerID: peer.Id(),
 		Resp:   resp,
